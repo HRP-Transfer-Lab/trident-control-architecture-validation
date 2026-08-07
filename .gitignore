@@ -3,7 +3,11 @@ Thumbs.db
 
 __pycache__/
 *.py[cod]
+*.egg-info/
 .pytest_cache/
+.pytest-tmp/
+pytest-cache-files-*/
+.test-artifacts/
 .ruff_cache/
 .mypy_cache/
 
@@ -17,4 +21,3 @@ data/processed/
 
 reports/generated/
 manifests/local/
-
