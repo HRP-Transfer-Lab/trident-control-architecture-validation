@@ -1,0 +1,49 @@
+models:
+  M0_general_performance:
+    family: baseline
+    description: Single general performance factor plus nuisance covariates.
+    allowed_stages:
+      - phase_a
+
+  M1_continuous_control_manifold:
+    family: continuous
+    description: Low-dimensional continuous control surface without discrete state assumptions.
+    allowed_stages:
+      - phase_a
+
+  M2_nonlinear_vigilance:
+    family: nonlinear_baseline
+    description: Inverted-U or equivalent non-linear vigilance explanation.
+    allowed_stages:
+      - phase_a
+
+  M3_three_profile_mixture:
+    family: static_mixture
+    description: Efficient regulated, inefficient overloaded and fast brittle profiles.
+    allowed_stages:
+      - phase_a
+
+  M4_four_pace_profile_mixture:
+    family: static_mixture
+    description: Slow compensatory, regulated, globally overloaded and fast brittle profiles.
+    allowed_stages:
+      - phase_a
+
+  M5_dynamic_trident_state_space:
+    family: dynamic_state_space
+    description: Transition-capable latent Trident state trajectory with dwell and re-entry predictions.
+    allowed_stages:
+      - phase_b
+
+scoring:
+  split_policy:
+    - participant_isolated
+    - dataset_isolated_when_available
+  metrics:
+    - held_out_log_likelihood
+    - predictive_accuracy
+    - calibration_error
+    - transition_prediction
+    - recovery_prediction
+  selection_rule: simplest_model_that_survives_registered_gates
+

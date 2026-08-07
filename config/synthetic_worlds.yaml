@@ -1,0 +1,27 @@
+synthetic_worlds:
+  W0_general_performance:
+    purpose: Test whether a single general factor can be falsely overfit as profile or state structure.
+
+  W1_continuous_manifold:
+    purpose: Test whether continuous control variation is falsely discretised.
+
+  W2_nonlinear_vigilance:
+    purpose: Test whether inverted-U vigilance dynamics mimic Trident states.
+
+  W3_three_profile_mixture:
+    purpose: Test recovery of the three-profile behavioural alternative.
+
+  W4_four_pace_mixture:
+    purpose: Test recovery of four PACE profiles without dynamic state topology.
+
+  W5_dynamic_trident_state_space:
+    purpose: Test whether transition, dwell and re-entry structure is distinguishable at realistic data quality.
+
+recovery_tests:
+  required:
+    - correct_world_selection
+    - parameter_recovery
+    - robustness_to_missingness
+    - robustness_to_short_windows
+    - participant_level_generalisation
+

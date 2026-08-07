@@ -1,0 +1,50 @@
+contrasts:
+  state_deviation_vs_personal_background:
+    target: within_person_deviation
+    background: stable_person_baseline
+    methods:
+      - cpca
+      - cvq
+
+  high_vs_low_control_demand:
+    target: high_control_demand_windows
+    background: low_control_demand_windows
+    methods:
+      - cpca
+      - cvq
+
+  transition_vs_stable_occupancy:
+    target: transition_windows
+    background: stable_state_windows
+    methods:
+      - cpca
+      - cvq
+
+  low_vs_preserved_vigilance:
+    target: low_vigilance_windows
+    background: preserved_vigilance_windows
+    methods:
+      - cpca
+      - cvq
+
+  recovery_vs_non_recovery:
+    target: post_error_recovery_windows
+    background: non_recovery_windows
+    methods:
+      - cpca
+      - cvq
+
+gated_methods:
+  cvae:
+    enabled_by_default: false
+    required_gates:
+      - sample_size_gate
+      - synthetic_recovery_gate
+      - leakage_audit_pass
+
+  graph_contrastive:
+    enabled_by_default: false
+    required_gates:
+      - transition_graph_stability
+      - dataset_transport_signal
+

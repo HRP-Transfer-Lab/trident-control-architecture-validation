@@ -1,0 +1,50 @@
+datasets:
+  acdc:
+    status: frozen_existing_evidence
+    role: source
+    tasks:
+      - stroop
+    primary_questions:
+      - trait_state_decomposition
+      - static_profile_recovery
+      - baseline_model_tournament
+
+  paired_control_vigilance:
+    status: frozen_existing_evidence
+    role: source
+    tasks:
+      - stroop
+      - flanker
+      - sart
+    primary_questions:
+      - cross_task_profile_structure
+      - vigilance_coupling
+      - repeat_session_structure
+
+  dmcc:
+    status: planned_public_extension
+    role: mechanism_extension
+    tasks:
+      - control_demand
+    primary_questions:
+      - demand_contrast
+      - signal_evidence_commit_identification
+
+  cog_bci:
+    status: planned_public_extension
+    role: mechanism_extension
+    tasks:
+      - eeg_hrv_behavior_bridge
+    primary_questions:
+      - modality_specificity
+      - negative_control
+
+  attention_coach:
+    status: gated_transport
+    role: prospective_target
+    tasks:
+      - attention_training
+    primary_questions:
+      - frozen_model_transport
+      - intervention_parameter_shift
+
