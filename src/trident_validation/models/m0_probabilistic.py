@@ -18,7 +18,7 @@ class M0ProbabilisticError(ValueError):
 
 @dataclass
 class M0ProbabilisticPCAModel(TournamentModel):
-    """One-factor probabilistic PCA baseline for formal tournament scoring."""
+    """Probabilistic PCA baseline for formal tournament scoring."""
 
     feature_columns: Sequence[str]
     random_state: int
@@ -43,8 +43,6 @@ class M0ProbabilisticPCAModel(TournamentModel):
     def fit(self, frame: pd.DataFrame, y: Any = None, groups: Any = None) -> "M0ProbabilisticPCAModel":
         """Fit PPCA parameters from training participants only."""
 
-        if self.latent_dimensions != 1:
-            raise M0ProbabilisticError("Milestone 1.5 M0 supports exactly one latent dimension")
         adapter = TrainingFeatureAdapter(
             feature_columns=self.feature_columns,
             min_observed_features_per_window=self.min_observed_features_per_window,
@@ -55,6 +53,8 @@ class M0ProbabilisticPCAModel(TournamentModel):
             raise M0ProbabilisticError("at least two training rows are required")
         if x.shape[1] < 1:
             raise M0ProbabilisticError("at least one feature is required")
+        if not 1 <= self.latent_dimensions <= x.shape[1]:
+            raise M0ProbabilisticError("latent_dimensions must be between 1 and feature count")
 
         covariance = (x.T @ x) / x.shape[0]
         eigenvalues, eigenvectors = np.linalg.eigh(covariance)
@@ -62,16 +62,18 @@ class M0ProbabilisticPCAModel(TournamentModel):
         eigenvalues = eigenvalues[order]
         eigenvectors = eigenvectors[:, order]
 
-        if x.shape[1] == 1:
+        if x.shape[1] == 1 or self.latent_dimensions >= x.shape[1]:
             noise_variance = max(float(eigenvalues[0]) * 0.05, self.jitter)
         else:
             trailing = eigenvalues[self.latent_dimensions :]
             noise_variance = float(np.mean(trailing)) if trailing.size else self.jitter
             noise_variance = max(noise_variance, self.jitter)
 
-        loading_scale = np.sqrt(max(float(eigenvalues[0]) - noise_variance, self.jitter))
-        loadings = eigenvectors[:, :1] * loading_scale
-        loadings[:, 0] = _orient_loading(loadings[:, 0], tuple(adapter.feature_columns))
+        loading_scales = np.sqrt(
+            np.maximum(eigenvalues[: self.latent_dimensions] - noise_variance, self.jitter)
+        )
+        loadings = eigenvectors[:, : self.latent_dimensions] * loading_scales
+        loadings = _orient_loadings(loadings, tuple(adapter.feature_columns))
         model_covariance = loadings @ loadings.T + noise_variance * np.eye(x.shape[1])
         model_covariance = model_covariance + self.jitter * np.eye(x.shape[1])
 
@@ -110,11 +112,16 @@ class M0ProbabilisticPCAModel(TournamentModel):
         values = standardised.to_numpy(dtype=float)
         observed_mask = standardised.notna().to_numpy(dtype=bool)
         scores = [
-            _posterior_factor_mean(row, mask, self.loadings_[:, 0], self.noise_variance_)
+            _posterior_factor_mean(row, mask, self.loadings_, self.noise_variance_)
             for row, mask in zip(values, observed_mask, strict=True)
         ]
+        columns = [
+            f"{self.model_id}_factor_{index + 1}"
+            for index in range(self.latent_dimensions)
+        ]
         return pd.DataFrame(
-            {f"{self.model_id}_factor_1": scores},
+            scores,
+            columns=columns,
             index=frame.index,
         )
 
@@ -153,12 +160,13 @@ class M0ProbabilisticPCAModel(TournamentModel):
         assert self.loadings_ is not None
         assert self.noise_variance_ is not None
         assert self.eigenvalues_ is not None
-        return {
+        metadata = {
             "model_id": self.model_id,
             "family": "baseline",
-            "model_form": "one_factor_probabilistic_pca",
+            "model_form": "probabilistic_pca",
             "random_state": int(self.random_state),
             "randomness": "closed_form_deterministic_ppca_with_explicit_seed_recorded",
+            "latent_dimensions": int(self.latent_dimensions),
             "feature_requirements": {
                 "feature_columns": list(self.feature_columns),
                 "min_observed_features_per_window": int(self.min_observed_features_per_window),
@@ -171,14 +179,29 @@ class M0ProbabilisticPCAModel(TournamentModel):
                 "ppca_noise_variance",
             ],
             "latent_labels": "neutral_numeric_factor",
-            "loadings": {
-                feature: float(value)
-                for feature, value in zip(self.feature_columns, self.loadings_[:, 0], strict=True)
-            },
             "noise_variance": float(self.noise_variance_),
             "eigenvalues": [float(value) for value in self.eigenvalues_],
             "imputation": self.adapter_.get_metadata(),
         }
+        if self.latent_dimensions == 1:
+            metadata["model_form"] = "one_factor_probabilistic_pca"
+            metadata["loadings"] = {
+                feature: float(value)
+                for feature, value in zip(self.feature_columns, self.loadings_[:, 0], strict=True)
+            }
+        else:
+            metadata["loadings"] = {
+                f"factor_{factor_index + 1}": {
+                    feature: float(value)
+                    for feature, value in zip(
+                        self.feature_columns,
+                        self.loadings_[:, factor_index],
+                        strict=True,
+                    )
+                }
+                for factor_index in range(self.latent_dimensions)
+            }
+        return metadata
 
     def _observed_feature_count(self, frame: pd.DataFrame) -> int:
         assert self.adapter_ is not None
@@ -190,8 +213,8 @@ class M0ProbabilisticPCAModel(TournamentModel):
         standardised = self.adapter_.observed_standardised(frame)
         values = standardised.to_numpy(dtype=float)
         observed_mask = standardised.notna().to_numpy(dtype=bool)
-        factors = self.predict_representation(frame).iloc[:, 0].to_numpy(dtype=float)
-        reconstruction = np.outer(factors, self.loadings_[:, 0])
+        factors = self.predict_representation(frame).to_numpy(dtype=float)
+        reconstruction = factors @ self.loadings_.T
         residual = values - reconstruction
         if observed_mask.any():
             mse = float(np.mean((residual[observed_mask]) ** 2))
@@ -242,14 +265,22 @@ def _posterior_factor_mean(
     observed_mask: np.ndarray,
     loadings: np.ndarray,
     noise_variance: float,
-) -> float:
+) -> list[float]:
     if not observed_mask.any():
-        return float("nan")
+        return [float("nan")] * loadings.shape[1]
     observed_values = row[observed_mask]
     observed_loadings = loadings[observed_mask]
-    denominator = 1.0 + float(observed_loadings.T @ observed_loadings) / noise_variance
-    numerator = float(observed_loadings.T @ observed_values) / noise_variance
-    return float(numerator / denominator)
+    precision = np.eye(loadings.shape[1]) + (observed_loadings.T @ observed_loadings) / noise_variance
+    numerator = (observed_loadings.T @ observed_values) / noise_variance
+    posterior_mean = np.linalg.solve(precision, numerator)
+    return [float(value) for value in posterior_mean]
+
+
+def _orient_loadings(loadings: np.ndarray, feature_columns: tuple[str, ...]) -> np.ndarray:
+    oriented = loadings.copy()
+    for factor_index in range(oriented.shape[1]):
+        oriented[:, factor_index] = _orient_loading(oriented[:, factor_index], feature_columns)
+    return oriented
 
 
 def _orient_loading(loadings: np.ndarray, feature_columns: tuple[str, ...]) -> np.ndarray:
@@ -271,4 +302,3 @@ def _orient_loading(loadings: np.ndarray, feature_columns: tuple[str, ...]) -> n
     if directional_sum < 0:
         return -loadings
     return loadings
-

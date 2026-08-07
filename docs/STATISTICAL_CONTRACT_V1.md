@@ -73,6 +73,31 @@ Two M0 implementations are allowed at this stage:
 
 Only the probabilistic M0 participates in the formal primary tournament score.
 
+## Static M1-M4 Contract
+
+Milestone 2 adds static candidate models only:
+
+- M1: two-dimensional continuous PPCA manifold;
+- M2: one-dimensional nonlinear latent readiness curve with quadratic feature expectations;
+- M3: three-component diagonal Gaussian mixture with neutral component labels;
+- M4: four-component diagonal Gaussian mixture with neutral component labels.
+
+All four models use the same `TournamentModel` contract and the same training-fitted feature adapter as formal M0. M3 and M4 may report BIC, AIC, posterior entropy and component weights, but held-out log density remains the primary comparison metric.
+
+M3/M4 component labels are `component_0`, `component_1`, and so on. They must not be renamed as theoretical Trident or PACE labels until separate validation gates are passed.
+
+## Static Synthetic Null Worlds
+
+Milestone 2 adds W0-W4 synthetic generators before running the real public-data tournament:
+
+- W0: one general-performance factor;
+- W1: continuous two-dimensional manifold;
+- W2: nonlinear inverted-U readiness;
+- W3: three-component neutral mixture;
+- W4: four-component neutral mixture.
+
+Every static candidate M0-M4 must score every static world W0-W4 under participant-isolated splits before public data are used. These worlds are falsification fixtures; they are not evidence for the Trident hypothesis.
+
 ## Normative Model Contract
 
 Normative preprocessing is itself a model family:
@@ -104,4 +129,3 @@ Model and run manifests must record:
 - How to harmonise density scores across models with different missing-data likelihood assumptions.
 - Which calibration metric should become primary for future probabilistic state/profile outputs.
 - How many bootstrap resamples are required for stability claims once M1-M5 are implemented.
-
