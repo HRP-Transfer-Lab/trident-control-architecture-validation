@@ -1,0 +1,36 @@
+upstream_evidence:
+  flow_zone_zone_validation:
+    repository: HRP-Transfer-Lab/flow-zone-zone-validation
+    branch: main
+    role: frozen_prior_evidence
+    pinned_commit: 2d8d479befd73155d2215c1fef80a60cd27eaa5b
+    materials:
+      - path: docs/methods.md
+        purpose: acdc_method_contract
+      - path: docs/cognitive_profile_interpretations.md
+        purpose: acdc_three_profile_interpretation_and_trait_state_results
+      - path: studies/paired-control-vigilance/RESULTS.md
+        purpose: paired_four_profile_and_vigilance_results
+      - path: studies/paired-control-vigilance/README.md
+        purpose: paired_study_scope_and_claim_boundary
+    import_policy:
+      mode: reference_only
+      do_not_copy_participant_data: true
+      do_not_modify_upstream_repo: true
+
+  flow_zone_protocol_lineage:
+    repository: HRP-Transfer-Lab/Flow-Zone
+    branch: main
+    role: theory_and_protocol_lineage
+    pinned_commit: 8a1d52ba991a62908b461e2f5e22dc4cec846fc2
+    materials:
+      - path: studies/trident_g_zone_validation_protocol_v_0_2.md
+        purpose: original_zone_validation_and_personalisation_protocol
+    import_policy:
+      mode: reference_only
+      do_not_modify_upstream_repo: true
+
+rules:
+  - Existing results are priors and constraints, not training labels.
+  - Re-running upstream analyses should use their own repositories and manifests.
+  - Any later upstream commit adopted here requires an explicit protocol amendment and manifest update.
