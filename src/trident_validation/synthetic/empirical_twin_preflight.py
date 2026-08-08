@@ -13,7 +13,7 @@ import pandas as pd
 
 from trident_validation.config import load_yaml_config
 from trident_validation.models.static_tournament_v2 import STATIC_TOURNAMENT_V2_CONTRACT
-from trident_validation.schema import validate_window_schema
+from trident_validation.schema import AVAILABILITY_FLAGS, validate_window_schema
 from trident_validation.synthetic.fixtures import CORE_SYNTHETIC_FEATURES, make_synthetic_window_table
 from trident_validation.synthetic.recovery import ground_truth_columns
 
@@ -28,13 +28,22 @@ def run_empirical_twin_preflight(
     *,
     config_path: str | Path = DEFAULT_CONFIG_PATH,
     output_dir: str | Path | None = None,
+    input_tables: Sequence[str | Path] | None = None,
+    allow_fallback_fixture: bool = True,
 ) -> dict[str, Any]:
     """Run nuisance-only preflight for M2.7 empirical-twin design."""
 
     start = time.perf_counter()
+    config_path = Path(config_path)
     config = load_yaml_config(config_path)
     _validate_preflight_config(config)
-    frame, input_mode = _load_or_make_preflight_frame(config)
+    frame, input_mode = _load_or_make_preflight_frame(
+        config,
+        config_base_dir=config_path.parent,
+        input_tables=input_tables,
+        allow_fallback_fixture=allow_fallback_fixture,
+    )
+    frame = canonicalise_empirical_window_table(frame)
     report = validate_window_schema(frame)
     _assert_no_truth_inputs(frame)
     feature_columns = tuple(config["nuisance_features"]["core_features"])
@@ -92,11 +101,42 @@ def estimate_empirical_nuisance(
     }
 
 
-def _load_or_make_preflight_frame(config: dict[str, Any]) -> tuple[pd.DataFrame, str]:
-    input_paths = [Path(path) for path in config["inputs"].get("empirical_window_tables", [])]
+def canonicalise_empirical_window_table(frame: pd.DataFrame) -> pd.DataFrame:
+    """Return a canonical M2.7 empirical window table.
+
+    Native canonical tables are returned unchanged. Flow Zone cognitive-window
+    outputs are mapped into the M2.7 canonical schema for nuisance estimation.
+    """
+
+    if {"source_dataset", "task_id", "window_start_trial", "n_trials_valid"}.issubset(
+        frame.columns
+    ):
+        return frame.copy()
+    if {"dataset_id", "task_family", "window_id", "window_size", "window_index"}.issubset(
+        frame.columns
+    ):
+        return _canonicalise_flowzone_cognitive_windows(frame)
+    return frame.copy()
+
+
+def _load_or_make_preflight_frame(
+    config: dict[str, Any],
+    *,
+    config_base_dir: Path,
+    input_tables: Sequence[str | Path] | None = None,
+    allow_fallback_fixture: bool = True,
+) -> tuple[pd.DataFrame, str]:
+    input_paths = _configured_input_paths(
+        config["inputs"].get("empirical_window_tables", []),
+        config_base_dir=config_base_dir,
+    )
+    if input_tables:
+        input_paths.extend(Path(path) for path in input_tables)
     if input_paths:
         frames = [_read_window_table(path) for path in input_paths]
-        return pd.concat(frames, ignore_index=True), "configured_empirical_tables"
+        return pd.concat(frames, ignore_index=True), "empirical_window_tables"
+    if not allow_fallback_fixture:
+        raise ValueError("no empirical window tables provided")
     fixture = config["inputs"]["fallback_smoke_fixture"]
     if not bool(fixture.get("enabled", False)):
         raise ValueError("no empirical_window_tables configured and fallback smoke fixture disabled")
@@ -113,6 +153,19 @@ def _load_or_make_preflight_frame(config: dict[str, Any]) -> tuple[pd.DataFrame,
     )
 
 
+def _configured_input_paths(raw_entries: Sequence[Any], *, config_base_dir: Path) -> list[Path]:
+    paths: list[Path] = []
+    for entry in raw_entries:
+        if isinstance(entry, dict):
+            if "path" not in entry:
+                raise ValueError("empirical_window_tables entries must include path")
+            raw_path = Path(str(entry["path"]))
+        else:
+            raw_path = Path(str(entry))
+        paths.append(raw_path if raw_path.is_absolute() else config_base_dir / raw_path)
+    return paths
+
+
 def _read_window_table(path: Path) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"empirical window table not found: {path}")
@@ -122,6 +175,110 @@ def _read_window_table(path: Path) -> pd.DataFrame:
     if path.suffix.lower() in {".parquet", ".pq"}:
         return pd.read_parquet(path)
     raise ValueError(f"unsupported empirical table format: {path}")
+
+
+def _canonicalise_flowzone_cognitive_windows(frame: pd.DataFrame) -> pd.DataFrame:
+    output = pd.DataFrame(index=frame.index)
+    output["source_dataset"] = frame["dataset_id"].astype(str)
+    output["source_version"] = "flow-zone-cognitive-windows"
+    output["participant_id"] = frame["participant_id"].astype(str)
+    output["session_id"] = (
+        frame["session_id"].astype(str)
+        if "session_id" in frame.columns
+        else "session_unknown"
+    )
+    output["task_id"] = frame["task_family"].astype(str)
+    output["block_id"] = frame["block_raw"].astype(str) if "block_raw" in frame.columns else "block_unknown"
+    output["window_id"] = frame["window_id"].astype(str)
+    window_size = pd.to_numeric(frame["window_size"], errors="coerce").fillna(1).astype(int)
+    window_index = pd.to_numeric(frame["window_index"], errors="coerce").fillna(0).astype(int)
+    output["window_start_trial"] = (window_index * window_size + 1).astype(int)
+    output["window_end_trial"] = (output["window_start_trial"] + window_size - 1).astype(int)
+    output["n_trials_total"] = pd.to_numeric(
+        frame.get("n_trials", window_size),
+        errors="coerce",
+    ).fillna(window_size).astype(int)
+    output["n_trials_valid"] = pd.to_numeric(
+        frame.get("n_valid_correct_rt", frame.get("n_valid_rt", output["n_trials_total"])),
+        errors="coerce",
+    ).fillna(output["n_trials_total"]).clip(lower=1).astype(int)
+    output["source_file_or_table"] = "flow-zone-zone-validation:data/processed/cognitive_windows"
+    output["source_commit_or_release"] = "external-flow-zone-github-database-derived"
+    output["source_hash_if_available"] = "not_recorded_in_input_table"
+    output["preprocessing_version"] = "m2.7-flowzone-cognitive-window-adapter-v1"
+    output["feature_version"] = "canonical-window-v1"
+
+    output["accuracy"] = pd.to_numeric(frame.get("accuracy"), errors="coerce")
+    output["median_rt_ms"] = pd.to_numeric(frame.get("median_rt_ms"), errors="coerce")
+    output["mean_response_speed"] = _flowzone_response_speed(frame)
+    output["rt_cv"] = pd.to_numeric(frame.get("rt_cv"), errors="coerce")
+    output["throughput_proxy"] = pd.to_numeric(frame.get("throughput_proxy"), errors="coerce")
+    output["trial_count"] = output["n_trials_valid"]
+    output["practice_or_session_index"] = pd.to_numeric(
+        frame.get("window_index", 0),
+        errors="coerce",
+    ).fillna(0)
+    output["time_on_task"] = output["practice_or_session_index"] * output["n_trials_total"]
+    output["condition_mix"] = frame.get("control_cost_type", "mixed")
+    output["congruency_mix"] = np.where(
+        pd.to_numeric(frame.get("control_cost_supported", False), errors="coerce").fillna(0).astype(bool),
+        "mixed",
+        "not_applicable",
+    )
+    output["switch_rate"] = np.nan
+    output["lure_rate"] = np.nan
+    output["difficulty_level"] = 1
+    output["soa_or_foreperiod"] = np.nan
+    output["response_mapping"] = "source_defined"
+    output["input_device"] = "unknown"
+    output["timing_quality"] = "source_defined"
+    output["browser_focus_flags"] = "unknown"
+
+    has_conflict = _flowzone_bool(frame, "control_cost_supported")
+    has_post_error = _flowzone_bool(frame, "pes_supported")
+    has_vigilance = output["task_id"].str.contains("sart", case=False, na=False)
+    output["has_conflict_cost"] = has_conflict
+    output["has_post_error"] = has_post_error
+    output["has_vigilance"] = has_vigilance
+    output["has_switch_structure"] = False
+    output["has_confidence"] = False
+    output["has_change_point"] = False
+
+    output["conflict_cost_rt"] = pd.to_numeric(frame.get("control_cost_rt_ms"), errors="coerce").where(has_conflict)
+    output["conflict_cost_accuracy"] = pd.to_numeric(frame.get("control_cost_acc"), errors="coerce").where(has_conflict)
+    output["post_error_adjustment"] = pd.to_numeric(frame.get("post_error_slowing_ms"), errors="coerce").where(has_post_error)
+    output["error_burstiness"] = pd.to_numeric(frame.get("error_burstiness"), errors="coerce").where(has_post_error)
+    output["recovery_slope"] = np.nan
+    output["vigilance_engagement"] = (1.0 - pd.to_numeric(frame.get("nonresponse_rate"), errors="coerce")).where(has_vigilance)
+    output["inhibitory_stability"] = output["accuracy"].where(has_vigilance)
+    output["reciprocal_rt"] = output["mean_response_speed"].where(has_vigilance)
+    output["slow_tail_response_speed"] = (output["mean_response_speed"] * (1.0 - pd.to_numeric(frame.get("slow_tail_rate"), errors="coerce"))).where(has_vigilance)
+    output["lapse_rate"] = pd.to_numeric(frame.get("nonresponse_rate"), errors="coerce").where(has_vigilance)
+    output["false_start_rate"] = pd.to_numeric(frame.get("fast_error_rate"), errors="coerce").where(has_vigilance)
+    output["vigilance_drift"] = pd.to_numeric(frame.get("rt_drift"), errors="coerce").where(has_vigilance)
+
+    for flag in AVAILABILITY_FLAGS:
+        output[flag] = output[flag].fillna(False).astype(bool)
+    return output
+
+
+def _flowzone_response_speed(frame: pd.DataFrame) -> pd.Series:
+    if "mean_response_speed" in frame.columns:
+        return pd.to_numeric(frame["mean_response_speed"], errors="coerce")
+    if "mean_rt_ms" in frame.columns:
+        mean_rt = pd.to_numeric(frame["mean_rt_ms"], errors="coerce")
+        return 1000.0 / mean_rt
+    median_rt = pd.to_numeric(frame.get("median_rt_ms"), errors="coerce")
+    return 1000.0 / median_rt
+
+
+def _flowzone_bool(frame: pd.DataFrame, column: str) -> pd.Series:
+    if column not in frame.columns:
+        return pd.Series(False, index=frame.index)
+    values = frame[column]
+    if values.dtype == bool:
+        return values.fillna(False)
+    return values.astype(str).str.lower().isin({"true", "1", "yes"})
 
 
 def _template_summary(frame: pd.DataFrame, features: tuple[str, ...]) -> pd.DataFrame:
@@ -371,10 +528,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run M2.7 empirical-twin nuisance preflight.")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG_PATH))
     parser.add_argument("--output-dir", default=None)
+    parser.add_argument(
+        "--input-table",
+        action="append",
+        default=None,
+        help="Canonical empirical window table path; may be supplied more than once.",
+    )
+    parser.add_argument(
+        "--no-fallback-fixture",
+        action="store_true",
+        help="Fail if no empirical input table is supplied.",
+    )
     args = parser.parse_args(argv)
     result = run_empirical_twin_preflight(
         config_path=args.config,
         output_dir=args.output_dir,
+        input_tables=args.input_table,
+        allow_fallback_fixture=not args.no_fallback_fixture,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0

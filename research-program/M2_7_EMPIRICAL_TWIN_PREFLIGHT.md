@@ -78,3 +78,41 @@ reports/generated/empirical_twin_preflight_v1/missingness_summary.csv
 ```
 
 This validates the nuisance-extraction path. It does not test model recovery and should not be interpreted scientifically.
+
+## Real Empirical Run Command
+
+Once a canonical empirical window table is available, run:
+
+```powershell
+$env:PYTHONPATH='src'
+python -m trident_validation.synthetic.empirical_twin_preflight `
+  --input-table C:\path\to\canonical_windows.csv `
+  --no-fallback-fixture
+```
+
+Multiple tables can be supplied by repeating `--input-table`.
+
+If the empirical source is the Flow Zone ACDC pipeline, regenerate or obtain:
+
+```text
+research/flow-zone-zone-validation/data/processed/cognitive_windows.parquet
+```
+
+That file is derived from the GitHub-hosted ACDC database release used by the Flow Zone validation pipeline. The preflight runner now adapts Flow Zone cognitive-window columns into the canonical M2.7 window schema before validation.
+
+The YAML config also accepts either plain paths:
+
+```yaml
+inputs:
+  empirical_window_tables:
+    - data/canonical_windows.csv
+```
+
+or path entries:
+
+```yaml
+inputs:
+  empirical_window_tables:
+    - path: data/canonical_windows.csv
+      role: empirical_nuisance_template_source
+```
