@@ -4,7 +4,7 @@
 
 This repository is a falsifiable computational validation programme for the Trident control architecture. It compares simpler behavioural explanations against richer Trident/PACE/APC models using public cognitive-control data, synthetic ground-truth experiments, and later prospective Attention Coach / WM Coach transport tests.
 
-Codex should optimise for **scientific validity, provenance, leakage prevention and reproducibility**, not for producing a favourable Trident result.
+Codex should optimise for **scientific validity, provenance, leakage prevention, reproducibility and computational efficiency**, not for producing a favourable Trident result.
 
 ## Read first
 
@@ -12,16 +12,18 @@ Before changing analysis code, read in this order:
 
 1. `CLAIMS_BOUNDARY.md`
 2. `research-program/RESEARCH_PROGRAM_V2.md`
-3. `docs/FLOW_ZONE_VALIDATION_V1.md`
-4. `docs/DATA_CONTRACT_V1.md`
-5. `docs/STATISTICAL_CONTRACT_V1.md`
-6. `config/model_tournament.yaml`
-7. `config/datasets.yaml`
-8. `config/contrasts.yaml`
-9. `config/synthetic_worlds.yaml`
-10. `config/upstream_evidence.yaml`
+3. `research-program/COMPUTATIONAL_BUDGET_AND_EXECUTION_V1.md`
+4. `docs/FLOW_ZONE_VALIDATION_V1.md`
+5. `docs/DATA_CONTRACT_V1.md`
+6. `docs/STATISTICAL_CONTRACT_V1.md`
+7. `config/model_tournament.yaml`
+8. `config/datasets.yaml`
+9. `config/contrasts.yaml`
+10. `config/synthetic_worlds.yaml`
+11. `config/compute_profiles.yaml`
+12. `config/upstream_evidence.yaml`
 
-`research-program/RESEARCH_PROGRAM_V2.md` is the **canonical forward research programme and milestone plan**. The V1 documents remain important methodological foundations and historical specifications, but their forward milestone ordering is superseded where it conflicts with Research Programme V2.
+`research-program/RESEARCH_PROGRAM_V2.md` is the **canonical forward research programme and milestone plan**. `research-program/COMPUTATIONAL_BUDGET_AND_EXECUTION_V1.md` is the **canonical computational execution contract**. The V1 documents remain important methodological foundations and historical specifications, but their forward milestone ordering is superseded where it conflicts with Research Programme V2.
 
 ## Hard scientific rules
 
@@ -42,6 +44,8 @@ Before changing analysis code, read in this order:
 15. **Do not hard-code the PACE→APC causal ordering.** APC→behaviour→PACE, PACE→APC→behaviour and regime×APC→PACE are competing architectures unless later evidence constrains them.
 16. **Do not hard-code a literal cusp.** A Trident cusp/bifurcation model must compete with continuous and generic dynamic-regime alternatives.
 17. **Transfer is an external prospective criterion.** Wrapper dip/recovery outcomes must not be used to define the same latent states that are then claimed to predict them.
+18. **Do not trade scientific validity for runtime.** Engineering optimisation must preserve numerical/scientific equivalence; scientific design changes require an explicit versioned protocol amendment.
+19. **Do not hide model failures or ambiguous results for compute reasons.** Timeouts, failed fits and degenerate solutions remain visible and auditable.
 
 ## Coding rules
 
@@ -64,6 +68,66 @@ Before changing analysis code, read in this order:
 - Keep model-specific code behind a common interface so competing models can be scored on identical folds.
 - Do not silently drop failed models, degenerate components or null results from reports.
 - Use British English in documentation and report prose.
+- Long jobs must report progress and be checkpointable/resumable as required by the computational budget contract.
+- Prefer vectorised array operations to Python row/component loops where numerically equivalent.
+- Avoid nested parallelism and uncontrolled BLAS/OpenMP threading.
+
+## Computational execution contract
+
+The canonical profiles are defined in `config/compute_profiles.yaml` and explained in `research-program/COMPUTATIONAL_BUDGET_AND_EXECUTION_V1.md`.
+
+### Smoke
+
+Use to prove that code, schemas, manifests, leakage guards and outputs work end-to-end.
+
+```text
+target: <2 minutes
+1–2 replicates/world by default
+no formal scientific claims
+Codex may run directly
+```
+
+### Pilot
+
+Use to expose obvious model confusion, performance bottlenecks and execution failures before scaling.
+
+```text
+target: <5–10 minutes
+~10–20 replicates/world by default
+no formal scientific claims
+Codex may run only if bounded, observable and interruptible
+```
+
+### Confirmatory
+
+Use only for registered scientific estimation.
+
+```text
+checkpointed
+resumable
+preflighted
+deterministic seed schedule
+clean-tree requirement where registered
+bounded parallelism
+formal output/manifests
+```
+
+**Codex must not launch a blocking confirmatory run expected to exceed 5 minutes.** It should validate smoke/pilot execution, run preflight, and provide the exact terminal command for the user to launch/resume the formal job.
+
+Any job expected to exceed 2 minutes must emit progress at least every 10–20 seconds. A silent console for tens of minutes is an execution defect.
+
+The default local worker policy is:
+
+```text
+process workers: 2
+OMP_NUM_THREADS=1
+MKL_NUM_THREADS=1
+OPENBLAS_NUM_THREADS=1
+```
+
+Increase to 3–4 workers only after benchmarking shows improved throughput without UI freezing or memory pressure.
+
+For future not-yet-run experiments, sequential precision and adaptive stress-boundary designs may be used only when pre-registered. They may not be introduced after confirmatory results are inspected. The currently registered M2.6 scientific schedule is preserved; it may be accelerated through vectorisation, duplicate-pass removal, batching, deterministic sharding, checkpoint/resume and bounded parallelism without changing the scientific design.
 
 ## Canonical variable architecture
 
@@ -115,12 +179,14 @@ The canonical sequence is now:
 - Preserve the current scoring contract, seed schedule, split logic and model definitions.
 - Freeze recovery/confusion matrices, false-discrete rates, stress results and manifests.
 - Do not retune models after seeing formal results.
+- Before relaunching a long run, implement/verify the execution contract: preflight, progress, checkpoint/resume, bounded workers and numerical-equivalence-tested optimisation.
 
 ### M2.7 — Empirical-twin static recovery
 
 - Estimate realistic nuisance structure from development public cognitive datasets.
 - Parameterise synthetic worlds with realistic between-person variance, session/block variance, covariance, autocorrelation, practice, fatigue, RT/accuracy distributions, error clustering, vigilance, source effects and missingness where available.
 - Re-test static recovery without changing the known latent truth.
+- For newly registered stress experiments, prefer boundary-finding/adaptive stress designs over dense exhaustive grids where scientifically appropriate.
 
 ### M3 — Variable Architecture V2
 
@@ -134,6 +200,7 @@ The canonical sequence is now:
 - Test competing vigilance relationships.
 - Test APC-continuous versus independent PACE-category architectures.
 - Establish which mechanistic distinctions are identifiable at realistic sample sizes and noise levels.
+- Run one identifiability question at a time rather than one combinatorial mega-experiment.
 
 ### M5 — Public mechanism tournament
 
@@ -155,7 +222,7 @@ R4 adaptive corridor + MI-lock / entropy-excess failure directions
 R5 literal Trident cusp / bifurcation model
 ```
 
-Do not interpret a literal cusp unless it wins against simpler alternatives and passes synthetic recovery.
+Do not interpret a literal cusp unless it wins against simpler alternatives and passes synthetic recovery. Stop escalation when a simpler model survives the registered predictive/transport gates and richer models add no meaningful held-out value.
 
 ### M7 — Integrated / contrastive validation
 
@@ -205,7 +272,8 @@ App data may estimate pre-specified participant random effects/baselines, but mu
 The next practical sequence is:
 
 ```text
-complete M2.6
+optimise/benchmark M2.6 execution without changing its scientific design
+→ complete M2.6
 → freeze results
 → inspect recovery/confusion patterns
 → build M2.7 empirical nuisance calibration
@@ -226,4 +294,5 @@ M2.6 is complete only when:
 - stress-condition recovery is reported;
 - full manifests/config hashes/seeds are recorded;
 - failures and ambiguous recoveries remain visible in the report;
-- no scientific parameter or model definition has been changed in response to the formal result.
+- no scientific parameter or model definition has been changed in response to the formal result;
+- long-run execution is observable, checkpointed/resumable and benchmarked under the computational budget contract.
