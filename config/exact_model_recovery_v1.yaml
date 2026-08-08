@@ -1,0 +1,49 @@
+study:
+  id: exact_model_recovery_v1
+  purpose: M2.6b exact-model diagnostic for the static M0-M4 tournament.
+  boundary:
+    amends_formal_m2_6_result: false
+    uses_stress_grid: false
+    uses_real_public_datasets: false
+
+exact_worlds:
+  - EW0_m0_exact
+  - EW1_m1_exact
+  - EW2_m2_exact
+  - EW3_m3_exact
+  - EW4_m4_exact
+
+models:
+  - M0_probabilistic_general_performance
+  - M1_continuous_control_manifold
+  - M2_nonlinear_vigilance
+  - M3_three_profile_mixture
+  - M4_four_pace_profile_mixture
+
+baseline:
+  replicates_per_world: 30
+  n_datasets: 3
+  participants_per_dataset: 36
+  sessions_per_participant: 2
+  min_windows_per_session: 2
+  max_windows_per_session: 4
+  technical_missingness_rate: 0.0
+  exact_signal_scale: 1.0
+
+split:
+  policy: participant_isolated
+  train_fraction: 0.75
+  test_fraction: 0.25
+
+selection:
+  primary_metric: heldout_log_density_mean_per_window
+  uncertainty_unit: participant
+  practical_equivalence_margin: 0.01
+  paired_ci_z: 1.96
+  tie_resolution: simplest_model_not_meaningfully_distinguishable_from_numerical_best
+
+seeds:
+  master_seed: 20260808
+
+outputs:
+  directory: reports/generated/exact_model_recovery_v1

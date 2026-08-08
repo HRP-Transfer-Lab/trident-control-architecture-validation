@@ -1,0 +1,113 @@
+study:
+  id: formal_synthetic_recovery_v1
+  purpose: Formal synthetic model-recovery experiment for existing W0-W4 generators and M0-M4 static tournament.
+  boundary:
+    uses_real_public_datasets: false
+    implements_m5: false
+    implements_cpca: false
+    implements_cvq: false
+    implements_cvae: false
+    implements_hmm: false
+    implements_graph_models: false
+    implements_attention_coach_transport: false
+
+worlds:
+  - W0_general_performance
+  - W1_continuous_manifold
+  - W2_nonlinear_vigilance
+  - W3_three_profile_mixture
+  - W4_four_pace_mixture
+
+models:
+  - M0_probabilistic_general_performance
+  - M1_continuous_control_manifold
+  - M2_nonlinear_vigilance
+  - M3_three_profile_mixture
+  - M4_four_pace_profile_mixture
+
+baseline:
+  replicates_per_world: 200
+  n_datasets: 3
+  participants_per_dataset: 36
+  sessions_per_participant: 2
+  min_windows_per_session: 2
+  max_windows_per_session: 4
+  observation_noise_scale: 1.0
+  source_shift_scale: 1.0
+  technical_missingness_rate: 0.01
+  latent_separation_scale: 1.0
+
+split:
+  policy: participant_isolated
+  train_fraction: 0.75
+  test_fraction: 0.25
+
+selection:
+  primary_metric: heldout_log_density_mean_per_window
+  uncertainty_unit: participant
+  practical_equivalence_margin: 0.01
+  paired_ci_z: 1.96
+  tie_resolution: simplest_model_not_meaningfully_distinguishable_from_numerical_best
+
+stress:
+  replicates_per_world_per_level: 40
+  one_factor_at_a_time: true
+  participant_count_per_dataset:
+    - 12
+    - 24
+    - 36
+    - 72
+  observation_noise_multiplier:
+    - 0.75
+    - 1.0
+    - 1.5
+    - 2.0
+  missingness:
+    - 0.00
+    - 0.05
+    - 0.15
+    - 0.30
+  source_dataset_shift_multiplier:
+    - 0.0
+    - 1.0
+    - 1.5
+    - 2.0
+  latent_profile_separation_multiplier:
+    - 0.60
+    - 0.80
+    - 1.00
+    - 1.25
+  windows_per_session_condition:
+    short:
+      min_windows_per_session: 1
+      max_windows_per_session: 2
+    baseline:
+      min_windows_per_session: 2
+      max_windows_per_session: 4
+    extended:
+      min_windows_per_session: 4
+      max_windows_per_session: 6
+
+seeds:
+  master_seed: 20260807
+  schedule_algorithm: sha256(study_id|master_seed|analysis_set|stress_family|stress_level|world_id|replicate_index)
+  child_seeds:
+    dataset_seed: sha256(run_id|dataset)
+    split_seed: sha256(run_id|split)
+    model_seed: sha256(run_id|model)
+
+decision_bands:
+  aligned_model_recovery:
+    strong_recovery_min: 0.70
+    moderate_ambiguous_min: 0.50
+    poor_below: 0.50
+  pooled_false_discrete_structure:
+    reassuring_max: 0.10
+    caution_max: 0.20
+    concerning_above: 0.20
+
+outputs:
+  directory: reports/generated
+  manifest: manifests/formal_synthetic_recovery_v1.json
+  report: reports/formal_synthetic_recovery_v1.md
+  compressed_replicate_audit: reports/generated/formal_synthetic_recovery_v1_replicates.csv.gz

@@ -11,6 +11,8 @@ from trident_validation.models import (
     results_to_frame,
     score_static_models_on_split,
 )
+from trident_validation.models._density import logsumexp
+from trident_validation.models.mixture import mixture_component_logpdf, _posterior_probabilities
 from trident_validation.splits import participant_train_test_split
 from trident_validation.synthetic import CORE_SYNTHETIC_FEATURES, make_static_synthetic_world
 
@@ -125,4 +127,101 @@ def test_static_models_do_not_mutate_canonical_holdout_data():
     _ = model.score_holdout(test)
 
     pd.testing.assert_frame_equal(test, canonical)
+
+
+def test_vectorised_mixture_scoring_matches_rowwise_helpers():
+    frame = make_static_synthetic_world(
+        "W4_four_pace_mixture",
+        seed=305,
+        participants_per_dataset=10,
+        min_windows_per_session=2,
+        max_windows_per_session=2,
+    )
+    split = participant_train_test_split(frame, test_size=0.25, seed=5)
+    train = frame.loc[list(split.train_indices)]
+    test = frame.loc[list(split.test_indices)]
+
+    model = M4FourProfileMixtureModel(CORE_SYNTHETIC_FEATURES, random_state=11).fit(train)
+    assert model.adapter_ is not None
+    assert model.weights_ is not None
+    assert model.means_ is not None
+    assert model.variances_ is not None
+    standardised = model.adapter_.observed_standardised(test)
+    values = standardised.to_numpy(dtype=float)
+    masks = standardised.notna().to_numpy(dtype=bool)
+
+    vector_scores = model.score_samples(test).to_numpy(dtype=float)
+    rowwise_scores = np.array(
+        [
+            logsumexp(
+                np.array(
+                    [
+                        np.log(max(weight, 1e-300))
+                        + mixture_component_logpdf(row, mean, variance, mask)
+                        for weight, mean, variance in zip(
+                            model.weights_,
+                            model.means_,
+                            model.variances_,
+                            strict=True,
+                        )
+                    ]
+                )
+            )
+            for row, mask in zip(values, masks, strict=True)
+        ]
+    )
+    vector_probabilities = model.predict_proba(test).to_numpy(dtype=float)
+    rowwise_probabilities = np.array(
+        [
+            _posterior_probabilities(
+                row,
+                model.weights_,
+                model.means_,
+                model.variances_,
+                mask,
+            )
+            for row, mask in zip(values, masks, strict=True)
+        ]
+    )
+
+    assert np.allclose(vector_scores, rowwise_scores)
+    assert np.allclose(vector_probabilities, rowwise_probabilities)
+
+
+def test_vectorised_m2_quadrature_matches_rowwise_helpers():
+    frame = make_static_synthetic_world(
+        "W2_nonlinear_vigilance",
+        seed=306,
+        participants_per_dataset=10,
+        min_windows_per_session=2,
+        max_windows_per_session=2,
+    )
+    split = participant_train_test_split(frame, test_size=0.25, seed=6)
+    train = frame.loc[list(split.train_indices)]
+    test = frame.loc[list(split.test_indices)]
+
+    model = M2NonlinearVigilanceModel(CORE_SYNTHETIC_FEATURES, random_state=12).fit(train)
+    assert model.adapter_ is not None
+    standardised = model.adapter_.observed_standardised(test)
+    values = standardised.to_numpy(dtype=float)
+    masks = standardised.notna().to_numpy(dtype=bool)
+    nodes, log_weights = model._standard_normal_quadrature()
+
+    vector_scores = model.score_samples(test).to_numpy(dtype=float)
+    rowwise_scores = np.array(
+        [
+            model._row_log_density(row, mask, nodes, log_weights)
+            for row, mask in zip(values, masks, strict=True)
+        ]
+    )
+    vector_moments = model.predict_representation(test).to_numpy(dtype=float)
+    rowwise_moments = np.array(
+        [
+            model._posterior_moments(row, mask, nodes, log_weights)
+            for row, mask in zip(values, masks, strict=True)
+        ]
+    )
+
+    assert np.allclose(vector_scores, rowwise_scores)
+    assert np.allclose(vector_moments, rowwise_moments)
 

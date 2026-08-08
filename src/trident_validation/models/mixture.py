@@ -8,7 +8,7 @@ from typing import Any, Sequence
 import numpy as np
 import pandas as pd
 
-from trident_validation.models._density import logsumexp, mixture_logpdf
+from trident_validation.models._density import LOG_2PI, diagonal_gaussian_logpdf, logsumexp
 from trident_validation.models.adapters import TrainingFeatureAdapter
 from trident_validation.models.base import FeatureRequirements, ModelScore, TournamentModel
 
@@ -103,10 +103,13 @@ class StaticGaussianMixtureModel(TournamentModel):
         standardised = self.adapter_.observed_standardised(frame)
         values = standardised.to_numpy(dtype=float)
         observed_mask = standardised.notna().to_numpy(dtype=bool)
-        scores = [
-            mixture_logpdf(row, self.weights_, self.means_, self.variances_, mask)
-            for row, mask in zip(values, observed_mask, strict=True)
-        ]
+        scores = _mixture_logpdf_by_row(
+            values,
+            self.weights_,
+            self.means_,
+            self.variances_,
+            observed_mask,
+        )
         return pd.Series(scores, index=frame.index, name=f"{self.model_id}_log_density")
 
     def predict_representation(self, frame: pd.DataFrame) -> pd.DataFrame:
@@ -123,10 +126,13 @@ class StaticGaussianMixtureModel(TournamentModel):
         standardised = self.adapter_.observed_standardised(frame)
         values = standardised.to_numpy(dtype=float)
         observed_mask = standardised.notna().to_numpy(dtype=bool)
-        rows = [
-            _posterior_probabilities(row, self.weights_, self.means_, self.variances_, mask)
-            for row, mask in zip(values, observed_mask, strict=True)
-        ]
+        rows = _posterior_probability_matrix(
+            values,
+            self.weights_,
+            self.means_,
+            self.variances_,
+            observed_mask,
+        )
         return pd.DataFrame(
             rows,
             columns=[f"{self.model_id}_component_{index}" for index in range(self.n_components)],
@@ -257,35 +263,17 @@ def _expectation(
     means: np.ndarray,
     variances: np.ndarray,
 ) -> tuple[np.ndarray, float]:
-    component_logs = []
-    observed = np.ones(x.shape[1], dtype=bool)
-    for row in x:
-        logs = np.array(
-            [
-                np.log(max(weight, 1e-300))
-                + mixture_component_logpdf(row, mean, variance, observed)
-                for weight, mean, variance in zip(weights, means, variances, strict=True)
-            ],
-            dtype=float,
-        )
-        normaliser = logsumexp(logs)
-        component_logs.append(logs - normaliser)
-    log_responsibilities = np.vstack(component_logs)
+    component_logs = _component_logpdf_matrix(
+        x,
+        weights,
+        means,
+        variances,
+        np.ones(x.shape, dtype=bool),
+    )
+    normaliser = _logsumexp_axis1(component_logs)
+    log_responsibilities = component_logs - normaliser[:, None]
     responsibilities = np.exp(log_responsibilities)
-    row_log_likelihoods = [
-        logsumexp(
-            np.array(
-                [
-                    np.log(max(weight, 1e-300))
-                    + mixture_component_logpdf(row, mean, variance, observed)
-                    for weight, mean, variance in zip(weights, means, variances, strict=True)
-                ],
-                dtype=float,
-            )
-        )
-        for row in x
-    ]
-    return responsibilities, float(np.sum(row_log_likelihoods))
+    return responsibilities, float(np.sum(normaliser))
 
 
 def _posterior_probabilities(
@@ -307,14 +295,86 @@ def _posterior_probabilities(
     return [float(value) for value in np.exp(logs - normaliser)]
 
 
+def _posterior_probability_matrix(
+    values: np.ndarray,
+    weights: np.ndarray,
+    means: np.ndarray,
+    variances: np.ndarray,
+    observed_mask: np.ndarray,
+) -> np.ndarray:
+    component_logs = _component_logpdf_matrix(
+        values,
+        weights,
+        means,
+        variances,
+        observed_mask,
+    )
+    normaliser = _logsumexp_axis1(component_logs)
+    return np.exp(component_logs - normaliser[:, None])
+
+
+def _mixture_logpdf_by_row(
+    values: np.ndarray,
+    weights: np.ndarray,
+    means: np.ndarray,
+    variances: np.ndarray,
+    observed_mask: np.ndarray,
+) -> np.ndarray:
+    component_logs = _component_logpdf_matrix(
+        values,
+        weights,
+        means,
+        variances,
+        observed_mask,
+    )
+    return _logsumexp_axis1(component_logs)
+
+
+def _component_logpdf_matrix(
+    values: np.ndarray,
+    weights: np.ndarray,
+    means: np.ndarray,
+    variances: np.ndarray,
+    observed_mask: np.ndarray,
+) -> np.ndarray:
+    rows = values.shape[0]
+    components = weights.shape[0]
+    output = np.full((rows, components), np.nan, dtype=float)
+    for mask in np.unique(observed_mask, axis=0):
+        row_selector = np.all(observed_mask == mask, axis=1)
+        if not bool(mask.any()):
+            continue
+        subset = values[row_selector][:, mask]
+        subset_means = means[:, mask]
+        subset_variances = np.maximum(variances[:, mask], 1e-10)
+        residual = subset[:, None, :] - subset_means[None, :, :]
+        gaussian_logs = -0.5 * np.sum(
+            LOG_2PI
+            + np.log(subset_variances)[None, :, :]
+            + (residual**2) / subset_variances[None, :, :],
+            axis=2,
+        )
+        output[row_selector] = np.log(np.maximum(weights, 1e-300))[None, :] + gaussian_logs
+    return output
+
+
+def _logsumexp_axis1(values: np.ndarray) -> np.ndarray:
+    maximum = np.max(values, axis=1)
+    finite = np.isfinite(maximum)
+    output = np.full(values.shape[0], np.nan, dtype=float)
+    if finite.any():
+        stable = values[finite] - maximum[finite, None]
+        output[finite] = maximum[finite] + np.log(np.sum(np.exp(stable), axis=1))
+    output[~finite] = maximum[~finite]
+    return output
+
+
 def mixture_component_logpdf(
     row: np.ndarray,
     mean: np.ndarray,
     variance: np.ndarray,
     observed_mask: np.ndarray,
 ) -> float:
-    from trident_validation.models._density import diagonal_gaussian_logpdf
-
     return diagonal_gaussian_logpdf(row, mean, variance, observed_mask)
 
 
