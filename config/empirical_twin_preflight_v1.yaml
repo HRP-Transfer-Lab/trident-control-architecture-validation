@@ -1,0 +1,45 @@
+study:
+  id: empirical_twin_preflight_v1
+  stage: M2.7_preflight
+  status: preflight_only
+
+contract:
+  static_tournament_contract: static_tournament_v2
+  nuisance_only_from_empirical_data: true
+  known_truth_synthetic_worlds_unchanged: true
+  formal_claims_allowed: false
+
+inputs:
+  empirical_window_tables: []
+  fallback_smoke_fixture:
+    enabled: true
+    seed: 20260808
+    n_datasets: 3
+    participants_per_dataset: 12
+    sessions_per_participant: 2
+    min_windows_per_session: 2
+    max_windows_per_session: 3
+
+nuisance_features:
+  core_features:
+    - accuracy
+    - median_rt_ms
+    - mean_response_speed
+    - rt_cv
+    - throughput_proxy
+  grouping:
+    template_columns:
+      - source_dataset
+      - task_id
+  temporal:
+    order_columns:
+      - source_dataset
+      - participant_id
+      - session_id
+      - window_start_trial
+    slope_columns:
+      - practice_or_session_index
+      - time_on_task
+
+outputs:
+  directory: reports/generated/empirical_twin_preflight_v1
