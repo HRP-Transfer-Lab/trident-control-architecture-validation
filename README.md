@@ -1,40 +1,89 @@
 # Trident Control Architecture Validation
 
-Public methodology and implementation scaffold for testing the Trident control-state architecture against simpler behavioural alternatives.
+Public methodology and implementation repository for testing the Trident control architecture against simpler behavioural alternatives.
 
-This repository supersedes the earlier Flow Zone validation plan by making the model-selection problem explicit. The target is not to assume that Trident states, PACE profiles or APC control modes are already validated, but to test whether they add predictive and recoverable structure beyond simpler explanations.
+The target is not to assume that Trident states, PACE profiles or APC control modes are already validated. The programme uses synthetic known-truth experiments, existing cognitive-task databases and later prospective Attention Coach / WM Coach transfer tests to constrain which latent architectures are recoverable, predictive and useful for intervention design.
 
-## Scope
+## Canonical research programme
 
-The V1 programme evaluates:
+The current programme-level roadmap is:
 
-- normative trait-state decomposition;
-- contrastive representation learning;
-- static and dynamic model tournaments;
-- synthetic model-recovery tests;
-- state-gated APC mechanism models;
-- prospective transport to limited Attention Coach data.
+- [`research-program/RESEARCH_PROGRAM_V2.md`](research-program/RESEARCH_PROGRAM_V2.md)
 
-The primary specification is [docs/FLOW_ZONE_VALIDATION_V1.md](docs/FLOW_ZONE_VALIDATION_V1.md).
+This **supersedes the forward milestone sequencing** in the original V1 planning documents while preserving completed work, frozen evidence, data/statistical contracts and the current M0–M4 static recovery programme.
 
-## Repository Layout
+The detailed V1 scientific specification remains available at:
+
+- [`docs/FLOW_ZONE_VALIDATION_V1.md`](docs/FLOW_ZONE_VALIDATION_V1.md)
+
+It should now be read as the detailed methodological foundation and historical V1 specification rather than the canonical forward milestone plan.
+
+## Research logic
 
 ```text
-config/      Registered dataset, model, contrast and synthetic-world config.
-docs/        Methodology notes and implementation-facing design documents.
-src/         Package areas for future implementation modules.
-studies/     Study-specific protocols, outputs and provenance.
-synthetic/   Synthetic worlds, interventions and recovery tests.
-reports/     Frozen reports produced by registered runs.
-tests/       Unit and regression tests for implementation modules.
-manifests/   Run manifests, hashes and analysis status records.
+SYNTHETIC KNOWN-TRUTH DATA
+What architectures can the methods distinguish?
+        ↓
+PUBLIC COGNITIVE DATABASES
+Which distinguishable architectures best predict real behaviour?
+        ↓
+ATTENTION / WM COACH
+Do the surviving models prospectively predict wrapper transfer
+and differential response to intervention?
 ```
 
-## Current Status
+The current working variable architecture separates:
 
-This is an implementation-ready research specification. Code modules are intentionally scaffolded but not filled in until the Stage 0 evidence freeze and analysis contracts are confirmed.
+```text
+stable person/layer capacity
++
+vigilance/readiness
++
+APC parameters:
+Signal / Evidence / Commit / Predictive Calibration
++
+dynamic learning regime
+→
+observed behaviour / PACE expression
+→
+prospective wrapper-transfer outcomes
+```
 
-## Claims Boundary
+PACE profiles are not assumed to be identical to Trident dynamical regimes, vigilance is not treated as another PACE profile, and a literal Trident cusp remains a candidate model rather than an imposed geometry.
 
-This repository tests candidate behavioural state/control structure. It does not establish brain states, diagnose individuals, validate clinical routing, or directly measure neural criticality. See [CLAIMS_BOUNDARY.md](CLAIMS_BOUNDARY.md).
+## Revised milestone sequence
 
+The forward programme is:
+
+```text
+M2.6  Formal static recovery
+M2.7  Empirical-twin static recovery
+M3    Variable Architecture V2
+M4    Mechanistic synthetic tournament
+M5    Public mechanism tournament
+M6    Dynamic-regime tournament
+M7    Integrated / contrastive validation
+M8    App hypothesis freeze
+M9    Attention / WM transport
+M10   Personalised intervention experiment
+```
+
+The current hard gate is to **finish and freeze the formal M0–M4 / W0–W4 static recovery experiment without contaminating it with later hierarchy or dynamic-model changes**.
+
+## Repository layout
+
+```text
+research-program/  Canonical programme roadmap and future programme-level contracts.
+config/             Registered dataset, model, contrast and synthetic-world config.
+docs/               Statistical, data and implementation contracts; historical V1 specification.
+src/                Python package implementation.
+studies/            Study-specific protocols, outputs and provenance.
+synthetic/          Synthetic worlds, interventions and recovery tests.
+reports/            Frozen reports produced by registered runs.
+tests/              Unit and regression tests.
+manifests/          Run manifests, hashes and analysis status records.
+```
+
+## Claims boundary
+
+This repository tests candidate behavioural state/control structure and prospective transfer predictions. It does not establish brain states, diagnose individuals, validate clinical routing or directly measure neural criticality. Behavioural analogues of Trident-G or Zhang–Tang dynamics must remain explicitly labelled as behavioural/computational unless stronger independent neural evidence is available. See [`CLAIMS_BOUNDARY.md`](CLAIMS_BOUNDARY.md).
