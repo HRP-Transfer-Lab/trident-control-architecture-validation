@@ -25,9 +25,10 @@ No APC, PACE, Trident-state or brain-critical-zone inference is made from this t
 | `missingness_rate.<feature>` | Full ACDC | source x task | observed feature availability | supported across 57 templates | candidate yes |
 | `session_within_person_variance.<feature>` | Paired Stroop-Flanker-SART | task x participant repeated session | at least 1 participant with 2+ sessions and observed feature | supported for observed paired task features | candidate yes |
 | `session_within_person_covariance.<feature_pair>` | Paired Stroop-Flanker-SART | task x participant repeated session | at least 2 complete session-deviation units | supported where feature pair observed | candidate yes |
-| `repeated_person_stability.<feature>` | Paired Stroop-Flanker-SART | task x repeated participant | at least 2 sessions/person | supported for 210 repeat participants | candidate yes |
-| `across_session_practice_slope.<feature>` | Paired Stroop-Flanker-SART | task x repeated participant | at least 2 ordered sessions/person | supported for observed paired task features | candidate yes |
-| `cross_task_session_covariance.<feature>` | Paired Stroop-Flanker-SART | participant x session | at least 2 complete paired task sessions | supported where common feature exists | candidate review |
+| `repeated_person_stability.<feature>` | Paired Stroop-Flanker-SART | task x repeated participant | repeat participants only; draft freeze threshold >= 30 repeat participants | explicitly estimated by paired adapter | candidate yes |
+| `session_order_context_trend.<feature>` | Paired Stroop-Flanker-SART | task x repeated participant | ordered repeated sessions; draft freeze threshold >= 30 repeat participants | supported for observed paired task features | candidate review |
+| `cross_task_session_covariance_raw.<feature>` | Paired Stroop-Flanker-SART | participant x session | at least 2 complete paired task sessions | supported where common feature exists | candidate review |
+| `cross_task_session_covariance_within_person.<feature>` | Paired Stroop-Flanker-SART | repeat participant x session deviation | repeat participants only; at least 2 complete deviation rows | supported where common feature exists | candidate review |
 | `within_session_window_variance_from_paired` | none | not applicable | paired source is session-level only | unsupported | no |
 | `lag1_autocorrelation_from_paired` | none | not applicable | paired source is session-level only | unsupported | no |
 | `within_session_fatigue_from_paired` | none | not applicable | paired source is session-level only | unsupported | no |
@@ -44,6 +45,24 @@ low_engagement_candidate
 ```
 
 These columns are prior analysis outputs and must not become empirical-background inputs.
+
+## Paired-Source Audit Link
+
+The paired repeated-session provenance and estimator audit is recorded in:
+
+```text
+research-program/M2_7_PAIRED_SOURCE_PROVENANCE_AUDIT.md
+```
+
+The audit resolved two draft-contract issues:
+
+```text
+session variance/covariance now use repeat participants only
+repeated-person stability now has an explicit estimator
+```
+
+It also renamed across-session practice as a session-order/context trend unless
+the upstream source design review justifies a pure practice interpretation.
 
 ## Open Decisions Before Freeze
 

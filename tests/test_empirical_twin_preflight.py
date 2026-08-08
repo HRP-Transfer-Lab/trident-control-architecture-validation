@@ -263,6 +263,10 @@ def test_paired_session_adapter_excludes_profile_columns_and_keeps_session_level
     forbidden = audit[audit["audit_item"] == "forbidden_columns_excluded"].iloc[0]
     assert int(forbidden["value"]) == 2
     assert "control_profile" in forbidden["detail"]
+    order = audit[audit["audit_item"] == "session_order_source"].iloc[0]
+    assert "online=1" in order["detail"]
+    interpretation = audit[audit["audit_item"] == "session_order_interpretation"].iloc[0]
+    assert "session-order/context trend" in interpretation["detail"]
     emitted = audit[audit["audit_item"] == "session_level_rows_emitted"].iloc[0]
     assert "no window semantics created" in emitted["detail"]
 
@@ -275,15 +279,21 @@ def test_paired_session_background_estimates_repeated_session_components():
         "paired_session_support",
         "paired_session_variance_decomposition",
         "paired_session_covariance_session",
-        "paired_session_practice_summary",
-        "paired_session_cross_task_covariance",
+        "paired_session_repeated_person_stability",
+        "paired_session_order_context_trend_summary",
+        "paired_session_cross_task_covariance_raw",
+        "paired_session_cross_task_covariance_within_person",
     }.issubset(outputs)
     variance = outputs["paired_session_variance_decomposition"]
     row = variance[
         (variance["task_id"] == "Stroop") & (variance["feature"] == "accuracy")
     ].iloc[0]
+    assert row["n_observed"] == 5
+    assert row["n_repeat_participants"] == 2
+    assert row["n_repeat_session_observations"] == 4
     assert row["session_support_status"] == "estimated"
     assert row["window_support_status"] == "unsupported"
+    assert row["estimation_method"] == "paired_session_repeat_only_deviation_variance_v2"
     unavailable = variance[
         (variance["task_id"] == "SART") & (variance["feature"] == "accuracy")
     ].iloc[0]
@@ -292,6 +302,21 @@ def test_paired_session_background_estimates_repeated_session_components():
     assert unavailable["support_reason"] == "feature_structurally_unavailable_for_task"
     support = outputs["paired_session_support"]
     assert set(support["window_level_support"]) == {"unsupported"}
+    stability = outputs["paired_session_repeated_person_stability"]
+    stability_row = stability[
+        (stability["task_id"] == "Stroop") & (stability["feature"] == "accuracy")
+    ].iloc[0]
+    assert stability_row["n_repeat_participants"] == 2
+    assert pd.notna(stability_row["repeat_person_stability_icc"])
+    session_cov = outputs["paired_session_covariance_session"]
+    assert set(session_cov["support_reason"].dropna()) <= {
+        "repeat_participant_session_deviations_from_participant_baseline",
+        "fewer_than_two_complete_units_for_feature_pair",
+    }
+    raw_cross = outputs["paired_session_cross_task_covariance_raw"]
+    within_cross = outputs["paired_session_cross_task_covariance_within_person"]
+    assert set(raw_cross["covariance_level"]) == {"raw"}
+    assert set(within_cross["covariance_level"]) == {"within_person_session_deviation"}
 
 
 def test_paired_session_cli_outputs_are_aggregate_only(tmp_path):
@@ -318,6 +343,10 @@ def test_paired_session_cli_outputs_are_aggregate_only(tmp_path):
 
     assert result["paired_session_background_included"] is True
     assert (output_dir / "paired_session_variance_decomposition.csv").exists()
+    assert (output_dir / "paired_session_repeated_person_stability.csv").exists()
+    assert (
+        output_dir / "paired_session_cross_task_covariance_within_person.csv"
+    ).exists()
     report = (output_dir / "empirical_twin_preflight_report.md").read_text(
         encoding="utf-8"
     )
@@ -516,4 +545,30 @@ def _paired_session_fixture():
                     "control_profile_probability": 0.99,
                 }
             )
+    rows.append(
+        {
+            "participant_id": "paired_singleton",
+            "session_id": "paired_singleton_online",
+            "session_type": "online",
+            "dataset_id": "paired",
+            "stroop_accuracy": 0.10,
+            "stroop_mean_rt_ms": 900.0,
+            "stroop_interference_rt_ms": 120.0,
+            "stroop_interference_accuracy": 0.10,
+            "stroop_throughput": 0.8,
+            "flanker_accuracy": 0.12,
+            "flanker_mean_rt_ms": 880.0,
+            "flanker_interference_rt_ms": 110.0,
+            "flanker_interference_accuracy": 0.09,
+            "flanker_throughput": 0.9,
+            "sart_commission_rate": 0.30,
+            "sart_omission_rate": 0.12,
+            "sart_anticipatory_rate": 0.03,
+            "sart_go_mean_rt_ms": 700.0,
+            "sart_go_rt_cv": 0.32,
+            "sart_pre_failure_speeding_ms": -10.0,
+            "control_profile": "forbidden_singleton_label",
+            "control_profile_probability": 0.95,
+        }
+    )
     return pd.DataFrame(rows)

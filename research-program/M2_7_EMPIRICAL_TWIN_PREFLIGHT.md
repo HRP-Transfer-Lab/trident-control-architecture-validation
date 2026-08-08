@@ -425,6 +425,12 @@ A local temporary Flow Zone replication clone contains:
 C:\Users\admin\OneDrive\Documents\GitHub\trident-g-platform\.tmp-zone-replication\flow-zone-zone-validation\data\processed\paired_vigilance_session_features.parquet
 ```
 
+The paired-source provenance and estimator audit is recorded in:
+
+```text
+research-program/M2_7_PAIRED_SOURCE_PROVENANCE_AUDIT.md
+```
+
 Aggregate inspection found:
 
 ```text
@@ -433,6 +439,7 @@ level: session summary
 tasks represented: Stroop, Flanker, SART
 participant/session fields: present
 profile/probability columns: present
+processed table sha256: DD30838E96FBC1A80C42D0CD41161644B1563BCCC3901B39AB9E9A1DED0065A0
 ```
 
 This table is not a canonical window table. A narrow paired-session adapter was
@@ -453,6 +460,8 @@ control_profile_probability
 high_engagement_candidate
 low_engagement_candidate
 session-level rows emitted: 2303
+session_type values observed: lab1; lab2; online
+session order fallback rows: 0
 ```
 
 Paired support:
@@ -487,10 +496,15 @@ The adapter estimates:
 
 ```text
 between-person session-level variance/covariance
-session-within-person variance/covariance
-across-session practice/session-order slopes
-cross-task covariance within participant-session
+session-within-person variance/covariance using repeat participants only
+repeated-person stability
+session-order/context trends
+raw cross-task covariance within participant-session
+within-person session-deviation cross-task covariance
 ```
+
+The session-order trend is not labelled as pure practice because online, lab1
+and lab2 may mix learning with testing-context changes.
 
 It explicitly leaves unsupported:
 
@@ -504,6 +518,12 @@ trial-count/window missingness
 The paired adapter therefore fills the repeated-session timescale that ACDC
 cannot identify, while ACDC remains primary for window-level and source/task
 background structure.
+
+The singleton-participant estimator audit confirmed that the earlier
+session-deviation calculation understated session variance. Across the 16
+observed paired feature rows, median session variance increased from `0.010489`
+under the singleton-including calculation to `0.015748` under the repeat-only
+calculation.
 
 No M0/M1/M2_EM/M3/M4 model fitting or empirical-twin recovery was performed
 with the paired source.

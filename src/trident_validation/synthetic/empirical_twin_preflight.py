@@ -185,6 +185,8 @@ PAIRED_SESSION_TASK_FEATURES = {
     },
 }
 
+PAIRED_CONTRACT_MIN_REPEAT_PARTICIPANTS = 30
+
 
 def estimate_paired_session_background(frame: pd.DataFrame) -> dict[str, pd.DataFrame]:
     """Estimate repeated-session empirical background from paired session summaries.
@@ -227,13 +229,23 @@ def estimate_paired_session_background(frame: pd.DataFrame) -> dict[str, pd.Data
             feature_columns,
             level="session",
         ),
-        "paired_session_practice_summary": _paired_session_practice(
+        "paired_session_repeated_person_stability": _paired_repeated_person_stability(
             long_frame,
             feature_columns,
         ),
-        "paired_session_cross_task_covariance": _paired_cross_task_covariance(
+        "paired_session_order_context_trend_summary": _paired_session_order_context_trend(
             long_frame,
             feature_columns,
+        ),
+        "paired_session_cross_task_covariance_raw": _paired_cross_task_covariance(
+            long_frame,
+            feature_columns,
+            level="raw",
+        ),
+        "paired_session_cross_task_covariance_within_person": _paired_cross_task_covariance(
+            long_frame,
+            feature_columns,
+            level="within_person_session_deviation",
         ),
     }
 
@@ -258,7 +270,7 @@ def canonicalise_paired_session_table(frame: pd.DataFrame) -> tuple[pd.DataFrame
     )
     valid = participant_valid & session_valid
     clean = frame.loc[valid].copy()
-    session_order = _paired_session_order(clean)
+    session_order, session_order_audit = _paired_session_order(clean)
     rows: list[dict[str, Any]] = []
     for index, row in clean.iterrows():
         for task_id, mapping in PAIRED_SESSION_TASK_FEATURES.items():
@@ -317,6 +329,7 @@ def canonicalise_paired_session_table(frame: pd.DataFrame) -> tuple[pd.DataFrame
                 "value": int(long_frame.shape[0]),
                 "detail": "one row per participant_session_task; no window semantics created",
             },
+            *session_order_audit,
         ]
     )
     return long_frame, audit
@@ -512,7 +525,7 @@ def _flowzone_bool(frame: pd.DataFrame, column: str) -> pd.Series:
     return values.astype(str).str.lower().isin({"true", "1", "yes"})
 
 
-def _paired_session_order(frame: pd.DataFrame) -> pd.Series:
+def _paired_session_order(frame: pd.DataFrame) -> tuple[pd.Series, list[dict[str, Any]]]:
     if "session_type" in frame.columns:
         mapped = frame["session_type"].astype(str).str.lower().map(
             {
@@ -526,10 +539,47 @@ def _paired_session_order(frame: pd.DataFrame) -> pd.Series:
             }
         )
         if mapped.notna().any():
-            return mapped.fillna(
+            order = mapped.fillna(
                 frame.groupby("participant_id", sort=True).cumcount().astype(float) + 1.0
             )
-    return frame.groupby("participant_id", sort=True).cumcount().astype(float) + 1.0
+            audit = [
+                {
+                    "audit_item": "session_order_source",
+                    "value": int(mapped.notna().sum()),
+                    "detail": "session_type mapped as online=1, lab1=2, lab2=3; unmapped rows use participant row order",
+                },
+                {
+                    "audit_item": "session_order_unmapped_rows",
+                    "value": int(mapped.isna().sum()),
+                    "detail": "row_order_fallback_count",
+                },
+                {
+                    "audit_item": "session_type_values_observed",
+                    "value": int(frame["session_type"].nunique(dropna=True)),
+                    "detail": ";".join(
+                        sorted(frame["session_type"].dropna().astype(str).unique())
+                    ),
+                },
+                {
+                    "audit_item": "session_order_interpretation",
+                    "value": 0,
+                    "detail": "reported as session-order/context trend unless source design separately supports pure practice",
+                },
+            ]
+            return order, audit
+    order = frame.groupby("participant_id", sort=True).cumcount().astype(float) + 1.0
+    return order, [
+        {
+            "audit_item": "session_order_source",
+            "value": int(frame.shape[0]),
+            "detail": "participant row order fallback; no session_type column present",
+        },
+        {
+            "audit_item": "session_order_interpretation",
+            "value": 0,
+            "detail": "reported as session-order/context trend unless source design separately supports pure practice",
+        },
+    ]
 
 
 def _paired_session_support(
@@ -558,7 +608,15 @@ def _paired_session_support(
                 "feature_coverage_mean": float(np.nanmean(coverages)) if coverages else float("nan"),
                 "between_person_support": _support_label(int(group["participant_id"].nunique()), 2),
                 "session_variance_support": _support_label(int((participant_sessions >= 2).sum()), 1),
-                "practice_support": _support_label(int((participant_sessions >= 2).sum()), 1),
+                "session_order_context_trend_support": _support_label(
+                    int((participant_sessions >= 2).sum()),
+                    1,
+                ),
+                "contract_repeat_support": _support_label(
+                    int((participant_sessions >= 2).sum()),
+                    PAIRED_CONTRACT_MIN_REPEAT_PARTICIPANTS,
+                ),
+                "contract_repeat_support_min_participants": PAIRED_CONTRACT_MIN_REPEAT_PARTICIPANTS,
                 "window_level_support": "unsupported",
                 "window_level_reason": "paired_source_is_session_summary_not_window_table",
             }
@@ -599,21 +657,31 @@ def _paired_session_variance(
     rows: list[dict[str, Any]] = []
     for keys, group in frame.groupby(["source_dataset", "task_id"], sort=True):
         source, task = keys
-        participant_session_counts = group.groupby("participant_id", sort=True)["session_id"].nunique()
         for feature in features:
             values = pd.to_numeric(group[feature], errors="coerce")
             observed = group.loc[:, ["participant_id", "session_id"]].copy()
             observed["_value"] = values
             observed = observed.dropna(subset=["_value"])
             participant_means = observed.groupby("participant_id", sort=True)["_value"].mean()
-            session_baselines = observed.join(
-                participant_means.rename("participant_mean"),
+            observed_session_counts = observed.groupby(
+                "participant_id",
+                sort=True,
+            )["session_id"].nunique()
+            repeat_ids = observed_session_counts[observed_session_counts >= 2].index
+            repeated_observed = observed[observed["participant_id"].isin(repeat_ids)]
+            repeat_participant_means = repeated_observed.groupby(
+                "participant_id",
+                sort=True,
+            )["_value"].mean()
+            repeated_session_baselines = repeated_observed.join(
+                repeat_participant_means.rename("participant_mean"),
                 on="participant_id",
             )
             session_deviation = (
-                session_baselines["_value"] - session_baselines["participant_mean"]
+                repeated_session_baselines["_value"]
+                - repeated_session_baselines["participant_mean"]
             )
-            repeated_count = int((participant_session_counts >= 2).sum())
+            repeated_count = int(len(repeat_ids))
             between = (
                 float(participant_means.var(ddof=1))
                 if participant_means.shape[0] > 1
@@ -638,6 +706,7 @@ def _paired_session_variance(
                     "n_observed": int(observed.shape[0]),
                     "n_participants": int(observed["participant_id"].nunique()),
                     "n_repeat_participants": repeated_count,
+                    "n_repeat_session_observations": int(repeated_observed.shape[0]),
                     "total_variance": total,
                     "between_participant_variance": between,
                     "session_within_participant_variance": session_var,
@@ -649,18 +718,27 @@ def _paired_session_variance(
                     "between_support_status": _support_label(participant_means.shape[0], 2),
                     "session_support_status": (
                         _support_label(repeated_count, 1)
-                        if observed.shape[0] >= 2 and participant_means.shape[0] > 0
+                        if repeated_observed.shape[0] >= 2
                         else "unsupported"
                     ),
+                    "contract_session_support_status": (
+                        _support_label(
+                            repeated_count,
+                            PAIRED_CONTRACT_MIN_REPEAT_PARTICIPANTS,
+                        )
+                        if repeated_observed.shape[0] >= 2
+                        else "unsupported"
+                    ),
+                    "contract_min_repeat_participants": PAIRED_CONTRACT_MIN_REPEAT_PARTICIPANTS,
                     "window_support_status": "unsupported",
                     "support_reason": (
                         "participants_with_repeated_sessions"
-                        if repeated_count and observed.shape[0] >= 2
+                        if repeated_count and repeated_observed.shape[0] >= 2
                         else "feature_structurally_unavailable_for_task"
                         if observed.shape[0] == 0
                         else "no_repeated_sessions_for_this_task"
                     ),
-                    "estimation_method": "paired_session_mean_deviation_variance_v1",
+                    "estimation_method": "paired_session_repeat_only_deviation_variance_v2",
                 }
             )
     return pd.DataFrame(rows)
@@ -683,17 +761,23 @@ def _paired_session_covariance(
             support_status = _support_label(units.shape[0], 2)
             support_reason = "participant_mean_covariance"
         elif level == "session":
-            participant_means = matrix.join(group["participant_id"]).groupby(
+            participant_session_counts = group.groupby(
+                "participant_id",
+                sort=True,
+            )["session_id"].nunique()
+            repeat_ids = participant_session_counts[participant_session_counts >= 2].index
+            repeat_mask = group["participant_id"].isin(repeat_ids)
+            repeat_matrix = matrix.loc[repeat_mask]
+            repeat_participants = group.loc[repeat_mask, "participant_id"]
+            participant_means = repeat_matrix.join(repeat_participants).groupby(
                 "participant_id",
                 sort=True,
             )[list(features)].transform("mean")
-            units = matrix - participant_means
-            repeat_count = int(
-                (group.groupby("participant_id", sort=True)["session_id"].nunique() >= 2).sum()
-            )
+            units = repeat_matrix - participant_means
+            repeat_count = int(len(repeat_ids))
             support_status = _support_label(repeat_count, 1)
             support_reason = (
-                "session_deviations_from_participant_baseline"
+                "repeat_participant_session_deviations_from_participant_baseline"
                 if repeat_count
                 else "no_repeated_sessions_for_this_task"
             )
@@ -710,8 +794,19 @@ def _paired_session_covariance(
                         "feature_a": feature_a,
                         "feature_b": feature_b,
                         "n_units": int(pair.shape[0]),
+                        "n_repeat_participants": repeat_count if level == "session" else np.nan,
                         "support_status": (
                             support_status if pair.shape[0] >= 2 else "unsupported"
+                        ),
+                        "contract_support_status": (
+                            _support_label(
+                                repeat_count,
+                                PAIRED_CONTRACT_MIN_REPEAT_PARTICIPANTS,
+                            )
+                            if level == "session" and pair.shape[0] >= 2
+                            else support_status
+                            if level == "between_person" and pair.shape[0] >= 2
+                            else "unsupported"
                         ),
                         "support_reason": (
                             support_reason
@@ -729,7 +824,78 @@ def _paired_session_covariance(
     return pd.DataFrame(rows)
 
 
-def _paired_session_practice(
+def _paired_repeated_person_stability(
+    frame: pd.DataFrame,
+    features: tuple[str, ...],
+) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    for keys, group in frame.groupby(["source_dataset", "task_id"], sort=True):
+        source, task = keys
+        for feature in features:
+            values = pd.to_numeric(group[feature], errors="coerce")
+            observed = group.loc[:, ["participant_id", "session_id"]].copy()
+            observed["_value"] = values
+            observed = observed.dropna(subset=["_value"])
+            session_counts = observed.groupby(
+                "participant_id",
+                sort=True,
+            )["session_id"].nunique()
+            repeat_ids = session_counts[session_counts >= 2].index
+            repeated = observed[observed["participant_id"].isin(repeat_ids)]
+            participant_means = repeated.groupby("participant_id", sort=True)["_value"].mean()
+            baselines = repeated.join(
+                participant_means.rename("participant_mean"),
+                on="participant_id",
+            )
+            residuals = baselines["_value"] - baselines["participant_mean"]
+            between = (
+                float(participant_means.var(ddof=1))
+                if participant_means.shape[0] > 1
+                else float("nan")
+            )
+            session = (
+                float(residuals.var(ddof=1))
+                if residuals.dropna().shape[0] > 1
+                else float("nan")
+            )
+            denominator = np.nansum([between, session])
+            rows.append(
+                {
+                    "source_dataset": source,
+                    "task_id": task,
+                    "feature": feature,
+                    "n_observed": int(observed.shape[0]),
+                    "n_repeat_participants": int(len(repeat_ids)),
+                    "n_repeat_session_observations": int(repeated.shape[0]),
+                    "between_participant_variance_repeat_only": between,
+                    "session_within_participant_variance_repeat_only": session,
+                    "repeat_person_stability_icc": _safe_fraction(between, denominator),
+                    "support_status": (
+                        _support_label(len(repeat_ids), 2)
+                        if repeated.shape[0] >= 2
+                        else "unsupported"
+                    ),
+                    "contract_support_status": (
+                        _support_label(
+                            len(repeat_ids),
+                            PAIRED_CONTRACT_MIN_REPEAT_PARTICIPANTS,
+                        )
+                        if repeated.shape[0] >= 2
+                        else "unsupported"
+                    ),
+                    "contract_min_repeat_participants": PAIRED_CONTRACT_MIN_REPEAT_PARTICIPANTS,
+                    "support_reason": (
+                        "repeat_participant_stability_icc"
+                        if repeated.shape[0] >= 2
+                        else "feature_structurally_unavailable_or_no_repeat_observations"
+                    ),
+                    "estimation_method": "repeat_participant_variance_fraction_icc_v1",
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _paired_session_order_context_trend(
     frame: pd.DataFrame,
     features: tuple[str, ...],
 ) -> pd.DataFrame:
@@ -758,18 +924,27 @@ def _paired_session_practice(
                     "source_dataset": source,
                     "task_id": task,
                     "feature": feature,
-                    "practice_usable_participants": int(len(slopes)),
-                    "practice_mean_slope": float(np.mean(slopes)) if slopes else float("nan"),
-                    "practice_median_slope": float(np.median(slopes)) if slopes else float("nan"),
-                    "practice_sd_slope": (
+                    "trend_usable_participants": int(len(slopes)),
+                    "trend_mean_slope": float(np.mean(slopes)) if slopes else float("nan"),
+                    "trend_median_slope": float(np.median(slopes)) if slopes else float("nan"),
+                    "trend_sd_slope": (
                         float(np.std(slopes, ddof=1)) if len(slopes) > 1 else float("nan")
                     ),
-                    "practice_support_status": "estimated" if slopes else "unsupported",
-                    "practice_support_reason": (
+                    "trend_support_status": "estimated" if slopes else "unsupported",
+                    "contract_support_status": (
+                        _support_label(
+                            len(slopes),
+                            PAIRED_CONTRACT_MIN_REPEAT_PARTICIPANTS,
+                        )
+                        if slopes
+                        else "unsupported"
+                    ),
+                    "trend_support_reason": (
                         "participants_with_repeated_sessions"
                         if slopes
                         else "no_repeated_sessions_with_observed_feature"
                     ),
+                    "trend_interpretation": "session_order_context_trend_not_pure_practice",
                 }
             )
     return pd.DataFrame(rows)
@@ -778,6 +953,8 @@ def _paired_session_practice(
 def _paired_cross_task_covariance(
     frame: pd.DataFrame,
     features: tuple[str, ...],
+    *,
+    level: str,
 ) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     for feature in features:
@@ -787,18 +964,43 @@ def _paired_cross_task_covariance(
             values=feature,
             aggfunc="mean",
         )
+        if level == "raw":
+            units = wide
+            support_reason = "raw_participant_session_cross_task_covariance"
+        elif level == "within_person_session_deviation":
+            session_counts = wide.reset_index().groupby(
+                "participant_id",
+                sort=True,
+            )["session_id"].nunique()
+            repeat_ids = session_counts[session_counts >= 2].index
+            repeated = wide.loc[
+                wide.index.get_level_values("participant_id").isin(repeat_ids)
+            ]
+            participant_means = repeated.groupby(level="participant_id", sort=True).transform(
+                "mean"
+            )
+            units = repeated - participant_means
+            support_reason = "repeat_participant_cross_task_session_deviations"
+        else:
+            raise ValueError(f"unknown paired cross-task covariance level: {level}")
         for task_a in wide.columns:
             for task_b in wide.columns:
-                pair = wide.loc[:, [task_a, task_b]].dropna()
+                pair = units.loc[:, [task_a, task_b]].dropna()
                 rows.append(
                     {
                         "source_dataset": "paired_control_vigilance",
+                        "covariance_level": level,
                         "feature": feature,
                         "task_a": str(task_a),
                         "task_b": str(task_b),
                         "n_sessions": int(pair.shape[0]),
                         "support_status": (
                             "estimated" if pair.shape[0] >= 2 else "unsupported"
+                        ),
+                        "support_reason": (
+                            support_reason
+                            if pair.shape[0] >= 2
+                            else "fewer_than_two_complete_sessions_for_task_pair"
                         ),
                         "covariance": (
                             float(pair.cov().iloc[0, 1])
@@ -1433,7 +1635,7 @@ def _preflight_markdown_report(
             "3. Session-to-session variation is reported separately from stable participant differences.",
             "4. Window/block variation within session is reported separately from session variation.",
             "5. Temporal autocorrelation is estimated only within source x task x participant x session sequences.",
-            "6. Across-session practice slopes are estimated only where participants have repeated sessions.",
+            "6. Across-session trends are estimated only where participants have repeated sessions; paired-source trends are labelled as session-order/context trends.",
             "7. Within-session fatigue slopes are estimated only where sessions have repeated windows.",
             "8. Between-person covariance is reported in `covariance_between_person.csv`.",
             "9. Within-person covariance is split into `covariance_session.csv` and `covariance_within_session.csv`.",
