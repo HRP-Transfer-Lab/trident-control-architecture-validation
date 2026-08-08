@@ -1,6 +1,8 @@
 from pathlib import Path
+import json
 import uuid
 
+import pandas as pd
 import pytest
 
 from trident_validation.schema import validate_window_schema
@@ -21,10 +23,15 @@ def test_empirical_twin_preflight_smoke_writes_outputs():
     assert result["formal_claims_allowed"] is False
     assert result["n_templates"] > 0
     assert (output_dir / "template_summary.csv").exists()
-    assert (output_dir / "template_covariance.csv").exists()
+    assert (output_dir / "template_support.csv").exists()
+    assert (output_dir / "covariance_raw.csv").exists()
+    assert (output_dir / "covariance_between_person.csv").exists()
+    assert (output_dir / "covariance_session.csv").exists()
+    assert (output_dir / "covariance_within_session.csv").exists()
     assert (output_dir / "variance_decomposition.csv").exists()
     assert (output_dir / "temporal_summary.csv").exists()
     assert (output_dir / "missingness_summary.csv").exists()
+    assert (output_dir / "empirical_twin_preflight_provenance.json").exists()
     assert (output_dir / "empirical_twin_preflight_summary.json").exists()
 
 
@@ -50,6 +57,12 @@ def test_empirical_twin_preflight_accepts_input_table(tmp_path):
     assert result["input_mode"] == "empirical_window_tables"
     assert result["n_rows"] == frame.shape[0]
     assert (output_dir / "template_summary.csv").exists()
+    provenance = json.loads(
+        (output_dir / "empirical_twin_preflight_provenance.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert provenance["input_tables"][0]["checksum"].startswith("sha256:")
 
 
 def test_empirical_twin_preflight_accepts_flowzone_cognitive_windows(tmp_path):
@@ -129,8 +142,12 @@ def test_empirical_nuisance_estimates_source_task_templates():
 
     assert set(nuisance) == {
         "template_summary",
+        "template_support",
         "feature_summary",
-        "template_covariance",
+        "covariance_raw",
+        "covariance_between_person",
+        "covariance_session",
+        "covariance_within_session",
         "variance_decomposition",
         "temporal_summary",
         "missingness_summary",
@@ -141,9 +158,101 @@ def test_empirical_nuisance_estimates_source_task_templates():
     assert nuisance["feature_summary"]["feature"].nunique() == 5
 
 
-def _minimal_flowzone_cognitive_windows():
-    import pandas as pd
+def test_nested_variance_decomposition_reports_session_and_window_components():
+    frame = _nested_canonical_fixture()
 
+    nuisance = preflight.estimate_empirical_nuisance(frame, feature_columns=("accuracy",))
+    variance = nuisance["variance_decomposition"]
+    row = variance[(variance["source_dataset"] == "source_a") & (variance["task_id"] == "stroop")].iloc[0]
+
+    assert row["between_support_status"] == "estimated"
+    assert row["session_support_status"] == "estimated"
+    assert row["window_support_status"] == "estimated"
+    assert row["between_participant_variance"] > 0
+    assert row["session_within_participant_variance"] >= 0
+    assert row["window_within_session_variance"] >= 0
+
+
+def test_sparse_template_reports_unsupported_components_without_pooling():
+    frame = _nested_canonical_fixture().iloc[[0]].copy()
+
+    nuisance = preflight.estimate_empirical_nuisance(frame, feature_columns=("accuracy",))
+    variance = nuisance["variance_decomposition"].iloc[0]
+    support = nuisance["template_support"].iloc[0]
+
+    assert variance["between_support_status"] == "unsupported"
+    assert variance["session_support_status"] == "unsupported"
+    assert variance["window_support_status"] == "unsupported"
+    assert support["variance_component_support"] == "unsupported"
+
+
+def test_temporal_autocorrelation_does_not_cross_tasks_or_sessions():
+    frame = _cross_task_temporal_fixture()
+
+    nuisance = preflight.estimate_empirical_nuisance(frame, feature_columns=("accuracy",))
+    temporal = nuisance["temporal_summary"]
+    stroop = temporal[temporal["task_id"] == "stroop"].iloc[0]
+    flanker = temporal[temporal["task_id"] == "flanker"].iloc[0]
+
+    assert stroop["lag1_support_status"] == "unsupported"
+    assert flanker["lag1_support_status"] == "unsupported"
+
+
+def test_covariance_levels_separate_between_person_and_within_session():
+    frame = _nested_canonical_fixture()
+
+    nuisance = preflight.estimate_empirical_nuisance(
+        frame,
+        feature_columns=("accuracy", "median_rt_ms"),
+    )
+
+    assert set(nuisance["covariance_between_person"]["covariance_level"]) == {
+        "between_person"
+    }
+    assert set(nuisance["covariance_within_session"]["covariance_level"]) == {
+        "within_session"
+    }
+    assert (
+        nuisance["covariance_between_person"]["support_status"] == "estimated"
+    ).any()
+
+
+def test_report_outputs_do_not_include_participant_ids(tmp_path):
+    frame = _nested_canonical_fixture()
+    input_path = tmp_path / "canonical_windows.csv"
+    output_dir = tmp_path / "preflight_outputs"
+    frame.to_csv(input_path, index=False)
+
+    preflight.run_empirical_twin_preflight(
+        input_tables=[input_path],
+        output_dir=output_dir,
+        allow_fallback_fixture=False,
+    )
+
+    report = (output_dir / "empirical_twin_preflight_report.md").read_text(
+        encoding="utf-8"
+    )
+    summary = (output_dir / "empirical_twin_preflight_summary.json").read_text(
+        encoding="utf-8"
+    )
+
+    assert "p001" not in report
+    assert "p001" not in summary
+
+
+def test_empirical_twin_preflight_is_deterministic_on_fixed_input(tmp_path):
+    frame = _nested_canonical_fixture()
+    first = preflight.estimate_empirical_nuisance(frame, feature_columns=("accuracy",))
+    second = preflight.estimate_empirical_nuisance(frame, feature_columns=("accuracy",))
+
+    pd.testing.assert_frame_equal(
+        first["variance_decomposition"],
+        second["variance_decomposition"],
+    )
+    pd.testing.assert_frame_equal(first["temporal_summary"], second["temporal_summary"])
+
+
+def _minimal_flowzone_cognitive_windows():
     return pd.DataFrame(
         [
             {
@@ -232,3 +341,73 @@ def _minimal_flowzone_cognitive_windows():
             },
         ]
     )
+
+
+def _nested_canonical_fixture():
+    rows = []
+    for participant_index, person_shift in enumerate([0.0, 0.3], start=1):
+        for session_index, session_shift in enumerate([0.0, 0.1], start=1):
+            for window_index, window_shift in enumerate([0.0, 0.02, -0.01], start=1):
+                accuracy = 0.75 + person_shift + session_shift + window_shift
+                rows.append(
+                    {
+                        "source_dataset": "source_a",
+                        "source_version": "test",
+                        "participant_id": f"p{participant_index:03d}",
+                        "session_id": f"s{session_index:02d}",
+                        "task_id": "stroop",
+                        "block_id": "b01",
+                        "window_id": f"p{participant_index}_s{session_index}_w{window_index}",
+                        "window_start_trial": 1 + (window_index - 1) * 20,
+                        "window_end_trial": window_index * 20,
+                        "n_trials_total": 20,
+                        "n_trials_valid": 20,
+                        "source_file_or_table": "test",
+                        "source_commit_or_release": "test",
+                        "source_hash_if_available": "sha256:test",
+                        "preprocessing_version": "test",
+                        "feature_version": "canonical-window-v1",
+                        "accuracy": accuracy,
+                        "median_rt_ms": 700.0 - 100.0 * accuracy,
+                        "mean_response_speed": 1000.0 / (700.0 - 100.0 * accuracy),
+                        "rt_cv": 0.2,
+                        "throughput_proxy": accuracy * 100.0,
+                        "trial_count": 20,
+                        "practice_or_session_index": session_index,
+                        "time_on_task": float(window_index),
+                        "condition_mix": "mixed",
+                        "congruency_mix": "balanced",
+                        "switch_rate": float("nan"),
+                        "lure_rate": float("nan"),
+                        "difficulty_level": 1,
+                        "soa_or_foreperiod": float("nan"),
+                        "response_mapping": "test",
+                        "input_device": "test",
+                        "timing_quality": "test",
+                        "browser_focus_flags": "none",
+                        "has_conflict_cost": True,
+                        "has_post_error": False,
+                        "has_vigilance": False,
+                        "has_switch_structure": False,
+                        "has_confidence": False,
+                        "has_change_point": False,
+                        "conflict_cost_rt": 50.0,
+                        "conflict_cost_accuracy": 0.03,
+                        "post_error_adjustment": float("nan"),
+                        "error_burstiness": float("nan"),
+                        "recovery_slope": float("nan"),
+                    }
+                )
+    return pd.DataFrame(rows)
+
+
+def _cross_task_temporal_fixture():
+    frame = _nested_canonical_fixture().iloc[:4].copy()
+    frame["participant_id"] = "p001"
+    frame["session_id"] = ["s01", "s01", "s02", "s02"]
+    frame["task_id"] = ["stroop", "flanker", "stroop", "flanker"]
+    frame["window_id"] = [f"w{index}" for index in range(4)]
+    frame["window_start_trial"] = [1, 21, 1, 21]
+    frame["window_end_trial"] = [20, 40, 20, 40]
+    frame["accuracy"] = [0.1, 0.9, 0.2, 0.8]
+    return frame

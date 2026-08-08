@@ -1,6 +1,6 @@
 # M2.7 Empirical-Twin Preflight
 
-**Status:** preflight scaffold  
+**Status:** strengthened preflight scaffold; real ACDC input not yet present locally
 **Static contract:** `static_tournament_v2`  
 **Config:** `config/empirical_twin_preflight_v1.yaml`
 
@@ -67,17 +67,45 @@ runtime: 4.355 seconds
 formal_claims_allowed: false
 ```
 
-Generated outputs:
+Generated smoke outputs:
 
 ```text
 reports/generated/empirical_twin_preflight_v1/template_summary.csv
-reports/generated/empirical_twin_preflight_v1/template_covariance.csv
+reports/generated/empirical_twin_preflight_v1/template_support.csv
 reports/generated/empirical_twin_preflight_v1/variance_decomposition.csv
+reports/generated/empirical_twin_preflight_v1/covariance_raw.csv
+reports/generated/empirical_twin_preflight_v1/covariance_between_person.csv
+reports/generated/empirical_twin_preflight_v1/covariance_session.csv
+reports/generated/empirical_twin_preflight_v1/covariance_within_session.csv
 reports/generated/empirical_twin_preflight_v1/temporal_summary.csv
 reports/generated/empirical_twin_preflight_v1/missingness_summary.csv
+reports/generated/empirical_twin_preflight_v1/empirical_twin_preflight_summary.json
+reports/generated/empirical_twin_preflight_v1/empirical_twin_preflight_provenance.json
+reports/generated/empirical_twin_preflight_v1/empirical_twin_preflight_report.md
 ```
 
 This validates the nuisance-extraction path. It does not test model recovery and should not be interpreted scientifically.
+
+## Strengthened Nuisance Decomposition
+
+The preflight now separates nuisance structure into explicit support-checked
+levels:
+
+```text
+source/task template support
+between-person variance and covariance
+session-within-participant variance and covariance
+window-within-session variance and covariance
+lag-1 autocorrelation within source x task x participant x session
+across-session practice slopes
+within-session time-on-task/fatigue slopes
+missingness by source/task/feature
+```
+
+Sparse templates are not discarded or automatically pooled. Unsupported
+components are reported as unsupported/NA with a support reason. Any later
+pooling or shrinkage rule must be written into a versioned empirical-twin
+contract before confirmatory generation.
 
 ## Real Empirical Run Command
 
@@ -99,6 +127,110 @@ research/flow-zone-zone-validation/data/processed/cognitive_windows.parquet
 ```
 
 That file is derived from the GitHub-hosted ACDC database release used by the Flow Zone validation pipeline. The preflight runner now adapts Flow Zone cognitive-window columns into the canonical M2.7 window schema before validation.
+
+## ACDC Input Search And Blocker
+
+Local search on the current workstation found the Flow Zone repository at:
+
+```text
+C:\Users\admin\OneDrive\Documents\GitHub\trident-g-platform\research\flow-zone-zone-validation
+```
+
+Repository provenance:
+
+```text
+repository: HRP-Transfer-Lab/flow-zone-zone-validation
+commit: 2d8d479befd73155d2215c1fef80a60cd27eaa5b
+```
+
+The intended ACDC nuisance input was not present:
+
+```text
+data/processed/cognitive_windows.parquet
+```
+
+The local `data/processed/` directory contains only `.gitkeep`, consistent with
+the upstream policy that raw, interim and processed participant-level data are
+excluded from Git.
+
+The existing Flow Zone command to regenerate the development ACDC window table
+is:
+
+```powershell
+cd C:\Users\admin\OneDrive\Documents\GitHub\trident-g-platform\research\flow-zone-zone-validation
+.\scripts\run_pipeline.ps1 -SkipModels
+```
+
+or, stage by stage:
+
+```powershell
+Rscript scripts/00_download_acdc.R
+Rscript scripts/01_inventory_acdc.R
+Rscript scripts/02_extract_trials_acdc.R
+.\.venv\Scripts\python.exe scripts/02b_build_pilot_subset.py
+.\.venv\Scripts\python.exe scripts/03_build_cognitive_windows.py `
+  --input data/interim/acdc_pilot_trial_extract.parquet
+```
+
+For a full-data formal calibration candidate, Flow Zone documents:
+
+```powershell
+.\scripts\run_pipeline.ps1 -AcdcTag "initial-release" -FullData -SkipModels
+```
+
+The public ACDC database source is `jstbcs/acdc-database`; the visible GitHub
+release metadata showed `initial-release` as the latest release, published
+2026-02-19. The Flow Zone downloader verifies the database release hash through
+`acdcquery::check_acdc()` and records release tag, published time, SHA-256,
+package versions and manifest metadata.
+
+Until `data/processed/cognitive_windows.parquet` exists locally, the real ACDC
+nuisance preflight is blocked. No fallback fixture result should be described
+as an empirical nuisance run.
+
+## Second Development Source Audit
+
+A local temporary Flow Zone replication clone contains:
+
+```text
+C:\Users\admin\OneDrive\Documents\GitHub\trident-g-platform\.tmp-zone-replication\flow-zone-zone-validation\data\processed\paired_vigilance_session_features.parquet
+```
+
+Aggregate inspection found:
+
+```text
+rows: 768
+level: session summary
+tasks represented: Stroop, Flanker, SART
+participant/session fields: present
+profile/probability columns: present
+```
+
+This table is not a canonical window table and includes prior paired-study
+profile/probability outputs that must not enter nuisance estimation as latent
+truth. It may be suitable as a second development nuisance source only after a
+separate adapter explicitly excludes profile/label columns and defines
+session/window semantics. It should not be forced into the immediate ACDC
+preflight.
+
+## Strengthened Smoke Result
+
+A bounded synthetic-fixture smoke of the strengthened extractor completed:
+
+```text
+input_mode: fallback_smoke_fixture
+rows: 178
+participants: 36
+sources: 3
+tasks: 4
+source/task templates: 12
+runtime: 18.072 seconds
+formal_claims_allowed: false
+```
+
+This confirms the strengthened nuisance-output path only. It is not an
+empirical run and makes no scientific model-recovery, APC, PACE or Trident
+claim.
 
 The YAML config also accepts either plain paths:
 
