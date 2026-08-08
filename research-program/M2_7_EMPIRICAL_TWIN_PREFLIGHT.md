@@ -417,7 +417,7 @@ decision is whether to build a separate paired Stroop-Flanker-SART adapter for
 repeated-session empirical background quantities before freezing
 `EMPIRICAL_BACKGROUND_CONTRACT_V1`.
 
-## Second Development Source Audit
+## Paired Repeated-Session Adapter
 
 A local temporary Flow Zone replication clone contains:
 
@@ -435,12 +435,78 @@ participant/session fields: present
 profile/probability columns: present
 ```
 
-This table is not a canonical window table and includes prior paired-study
-profile/probability outputs that must not enter nuisance estimation as latent
-truth. It may be suitable as a second development nuisance source only after a
-separate adapter explicitly excludes profile/label columns and defines
-session/window semantics. It should not be forced into the immediate ACDC
-preflight.
+This table is not a canonical window table. A narrow paired-session adapter was
+added to estimate repeated-session empirical background quantities only. It
+does not create artificial window rows.
+
+The adapter excludes profile, probability, cluster/candidate and latent-like
+columns before estimation. The local audit reported:
+
+```text
+input rows: 768
+rows with valid identity: 768
+rows excluded for missing identity: 0
+forbidden columns excluded: 4
+excluded columns:
+control_profile
+control_profile_probability
+high_engagement_candidate
+low_engagement_candidate
+session-level rows emitted: 2303
+```
+
+Paired support:
+
+```text
+Flanker:
+session-task rows: 768
+participants: 466
+sessions: 768
+repeat participants: 210
+supported features: 5
+feature coverage min: 1.000
+
+SART:
+session-task rows: 768
+participants: 466
+sessions: 768
+repeat participants: 210
+supported features: 6
+feature coverage min: 0.982
+
+Stroop:
+session-task rows: 767
+participants: 466
+sessions: 767
+repeat participants: 210
+supported features: 5
+feature coverage min: 1.000
+```
+
+The adapter estimates:
+
+```text
+between-person session-level variance/covariance
+session-within-person variance/covariance
+across-session practice/session-order slopes
+cross-task covariance within participant-session
+```
+
+It explicitly leaves unsupported:
+
+```text
+within-session/window variance
+lag-1 window autocorrelation
+within-session fatigue
+trial-count/window missingness
+```
+
+The paired adapter therefore fills the repeated-session timescale that ACDC
+cannot identify, while ACDC remains primary for window-level and source/task
+background structure.
+
+No M0/M1/M2_EM/M3/M4 model fitting or empirical-twin recovery was performed
+with the paired source.
 
 ## Strengthened Smoke Result
 

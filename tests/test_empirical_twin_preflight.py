@@ -252,6 +252,78 @@ def test_empirical_twin_preflight_is_deterministic_on_fixed_input(tmp_path):
     pd.testing.assert_frame_equal(first["temporal_summary"], second["temporal_summary"])
 
 
+def test_paired_session_adapter_excludes_profile_columns_and_keeps_session_level():
+    frame = _paired_session_fixture()
+
+    long_frame, audit = preflight.canonicalise_paired_session_table(frame)
+
+    assert set(long_frame["task_id"]) == {"Stroop", "Flanker", "SART"}
+    assert "control_profile" not in long_frame.columns
+    assert "control_profile_probability" not in long_frame.columns
+    forbidden = audit[audit["audit_item"] == "forbidden_columns_excluded"].iloc[0]
+    assert int(forbidden["value"]) == 2
+    assert "control_profile" in forbidden["detail"]
+    emitted = audit[audit["audit_item"] == "session_level_rows_emitted"].iloc[0]
+    assert "no window semantics created" in emitted["detail"]
+
+
+def test_paired_session_background_estimates_repeated_session_components():
+    outputs = preflight.estimate_paired_session_background(_paired_session_fixture())
+
+    assert {
+        "paired_session_adapter_audit",
+        "paired_session_support",
+        "paired_session_variance_decomposition",
+        "paired_session_covariance_session",
+        "paired_session_practice_summary",
+        "paired_session_cross_task_covariance",
+    }.issubset(outputs)
+    variance = outputs["paired_session_variance_decomposition"]
+    row = variance[
+        (variance["task_id"] == "Stroop") & (variance["feature"] == "accuracy")
+    ].iloc[0]
+    assert row["session_support_status"] == "estimated"
+    assert row["window_support_status"] == "unsupported"
+    unavailable = variance[
+        (variance["task_id"] == "SART") & (variance["feature"] == "accuracy")
+    ].iloc[0]
+    assert unavailable["n_observed"] == 0
+    assert unavailable["session_support_status"] == "unsupported"
+    assert unavailable["support_reason"] == "feature_structurally_unavailable_for_task"
+    support = outputs["paired_session_support"]
+    assert set(support["window_level_support"]) == {"unsupported"}
+
+
+def test_paired_session_cli_outputs_are_aggregate_only(tmp_path):
+    windows = make_synthetic_window_table(
+        seed=123,
+        n_datasets=3,
+        participants_per_dataset=2,
+        sessions_per_participant=1,
+        min_windows_per_session=1,
+        max_windows_per_session=1,
+    )
+    window_path = tmp_path / "windows.csv"
+    paired_path = tmp_path / "paired_sessions.csv"
+    output_dir = tmp_path / "outputs"
+    windows.to_csv(window_path, index=False)
+    _paired_session_fixture().to_csv(paired_path, index=False)
+
+    result = preflight.run_empirical_twin_preflight(
+        input_tables=[window_path],
+        paired_session_tables=[paired_path],
+        output_dir=output_dir,
+        allow_fallback_fixture=False,
+    )
+
+    assert result["paired_session_background_included"] is True
+    assert (output_dir / "paired_session_variance_decomposition.csv").exists()
+    report = (output_dir / "empirical_twin_preflight_report.md").read_text(
+        encoding="utf-8"
+    )
+    assert "paired_p1" not in report
+
+
 def _minimal_flowzone_cognitive_windows():
     return pd.DataFrame(
         [
@@ -411,3 +483,37 @@ def _cross_task_temporal_fixture():
     frame["window_end_trial"] = [20, 40, 20, 40]
     frame["accuracy"] = [0.1, 0.9, 0.2, 0.8]
     return frame
+
+
+def _paired_session_fixture():
+    rows = []
+    for participant_id, person_shift in [("paired_p1", 0.00), ("paired_p2", 0.10)]:
+        for session_index, session_type in enumerate(["online", "lab1"], start=1):
+            practice = 0.03 * (session_index - 1)
+            rows.append(
+                {
+                    "participant_id": participant_id,
+                    "session_id": f"{participant_id}_{session_type}",
+                    "session_type": session_type,
+                    "dataset_id": "paired",
+                    "stroop_accuracy": 0.80 + person_shift + practice,
+                    "stroop_mean_rt_ms": 700.0 - 20.0 * person_shift - 10.0 * practice,
+                    "stroop_interference_rt_ms": 90.0 - 5.0 * practice,
+                    "stroop_interference_accuracy": 0.05 - 0.01 * practice,
+                    "stroop_throughput": 1.1 + person_shift + practice,
+                    "flanker_accuracy": 0.82 + person_shift + practice,
+                    "flanker_mean_rt_ms": 650.0 - 20.0 * person_shift - 10.0 * practice,
+                    "flanker_interference_rt_ms": 70.0 - 5.0 * practice,
+                    "flanker_interference_accuracy": 0.04 - 0.01 * practice,
+                    "flanker_throughput": 1.2 + person_shift + practice,
+                    "sart_commission_rate": 0.20 - 0.02 * practice,
+                    "sart_omission_rate": 0.08 - 0.01 * practice,
+                    "sart_anticipatory_rate": 0.02,
+                    "sart_go_mean_rt_ms": 600.0 - 10.0 * practice,
+                    "sart_go_rt_cv": 0.25 - 0.01 * practice,
+                    "sart_pre_failure_speeding_ms": -25.0 + practice,
+                    "control_profile": "forbidden_label",
+                    "control_profile_probability": 0.99,
+                }
+            )
+    return pd.DataFrame(rows)

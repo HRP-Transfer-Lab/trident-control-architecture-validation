@@ -32,6 +32,7 @@ def run_empirical_twin_preflight(
     config_path: str | Path = DEFAULT_CONFIG_PATH,
     output_dir: str | Path | None = None,
     input_tables: Sequence[str | Path] | None = None,
+    paired_session_tables: Sequence[str | Path] | None = None,
     allow_fallback_fixture: bool = True,
 ) -> dict[str, Any]:
     """Run nuisance-only preflight for M2.7 empirical-twin design."""
@@ -51,6 +52,18 @@ def run_empirical_twin_preflight(
     _assert_no_truth_inputs(frame)
     feature_columns = tuple(config["nuisance_features"]["core_features"])
     nuisance = estimate_empirical_nuisance(frame, feature_columns=feature_columns)
+    paired_metadata: list[dict[str, Any]] = []
+    if paired_session_tables:
+        paired_frames = []
+        for path in paired_session_tables:
+            paired_path = Path(path)
+            paired_frames.append(_read_window_table(paired_path))
+            paired_metadata.append(_input_metadata(paired_path))
+        nuisance.update(
+            estimate_paired_session_background(
+                pd.concat(paired_frames, ignore_index=True)
+            )
+        )
     target_dir = Path(output_dir or config["outputs"]["directory"])
     paths = _write_preflight_outputs(
         nuisance,
@@ -61,6 +74,7 @@ def run_empirical_twin_preflight(
             "timestamp_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
             "input_mode": input_mode,
             "input_tables": input_metadata,
+            "paired_session_tables": paired_metadata,
             "validation_repo_commit": _repo_commit_or_unknown(Path.cwd()),
             "config_path": str(config_path),
             "config_hash": hash_file(config_path),
@@ -88,6 +102,7 @@ def run_empirical_twin_preflight(
         "n_sources": int(report.n_sources),
         "n_tasks": int(report.n_tasks),
         "n_templates": int(nuisance["template_summary"].shape[0]),
+        "paired_session_background_included": bool(paired_session_tables),
         "formal_claims_allowed": False,
         "runtime_seconds": round(float(time.perf_counter() - start), 3),
     }
@@ -131,6 +146,180 @@ def estimate_empirical_nuisance(
         "temporal_summary": temporal,
         "missingness_summary": missingness,
     }
+
+
+PAIRED_FORBIDDEN_COLUMN_PATTERNS = (
+    "profile",
+    "cluster",
+    "candidate",
+    "probability",
+    "gmm",
+    "pace",
+    "trident",
+    "state",
+    "latent",
+)
+
+PAIRED_SESSION_TASK_FEATURES = {
+    "Stroop": {
+        "accuracy": "stroop_accuracy",
+        "mean_rt_ms": "stroop_mean_rt_ms",
+        "throughput_proxy": "stroop_throughput",
+        "conflict_cost_rt": "stroop_interference_rt_ms",
+        "conflict_cost_accuracy": "stroop_interference_accuracy",
+    },
+    "Flanker": {
+        "accuracy": "flanker_accuracy",
+        "mean_rt_ms": "flanker_mean_rt_ms",
+        "throughput_proxy": "flanker_throughput",
+        "conflict_cost_rt": "flanker_interference_rt_ms",
+        "conflict_cost_accuracy": "flanker_interference_accuracy",
+    },
+    "SART": {
+        "mean_rt_ms": "sart_go_mean_rt_ms",
+        "rt_cv": "sart_go_rt_cv",
+        "commission_rate": "sart_commission_rate",
+        "omission_rate": "sart_omission_rate",
+        "anticipatory_rate": "sart_anticipatory_rate",
+        "pre_failure_speeding_ms": "sart_pre_failure_speeding_ms",
+    },
+}
+
+
+def estimate_paired_session_background(frame: pd.DataFrame) -> dict[str, pd.DataFrame]:
+    """Estimate repeated-session empirical background from paired session summaries.
+
+    The paired source is session-level. It is never adapted as window-level data,
+    and profile/probability/cluster columns are audited as excluded inputs.
+    """
+
+    long_frame, audit = canonicalise_paired_session_table(frame)
+    feature_columns = tuple(
+        column
+        for column in long_frame.columns
+        if column
+        not in {
+            "source_dataset",
+            "participant_id",
+            "session_id",
+            "task_id",
+            "session_order",
+        }
+    )
+    return {
+        "paired_session_adapter_audit": audit,
+        "paired_session_support": _paired_session_support(long_frame, feature_columns),
+        "paired_session_feature_summary": _paired_session_feature_summary(
+            long_frame,
+            feature_columns,
+        ),
+        "paired_session_variance_decomposition": _paired_session_variance(
+            long_frame,
+            feature_columns,
+        ),
+        "paired_session_covariance_between_person": _paired_session_covariance(
+            long_frame,
+            feature_columns,
+            level="between_person",
+        ),
+        "paired_session_covariance_session": _paired_session_covariance(
+            long_frame,
+            feature_columns,
+            level="session",
+        ),
+        "paired_session_practice_summary": _paired_session_practice(
+            long_frame,
+            feature_columns,
+        ),
+        "paired_session_cross_task_covariance": _paired_cross_task_covariance(
+            long_frame,
+            feature_columns,
+        ),
+    }
+
+
+def canonicalise_paired_session_table(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Return a long session-level table plus an aggregate exclusion audit."""
+
+    required = {"participant_id", "session_id"}
+    missing = sorted(required - set(frame.columns))
+    if missing:
+        raise ValueError("paired session table missing required columns: " + ", ".join(missing))
+    forbidden_columns = [
+        column
+        for column in frame.columns
+        if any(pattern in column.lower() for pattern in PAIRED_FORBIDDEN_COLUMN_PATTERNS)
+    ]
+    participant_valid = frame["participant_id"].notna() & ~frame["participant_id"].astype(
+        str
+    ).str.lower().isin({"", "nan", "none", "null"})
+    session_valid = frame["session_id"].notna() & ~frame["session_id"].astype(str).str.lower().isin(
+        {"", "nan", "none", "null"}
+    )
+    valid = participant_valid & session_valid
+    clean = frame.loc[valid].copy()
+    session_order = _paired_session_order(clean)
+    rows: list[dict[str, Any]] = []
+    for index, row in clean.iterrows():
+        for task_id, mapping in PAIRED_SESSION_TASK_FEATURES.items():
+            output_row: dict[str, Any] = {
+                "source_dataset": "paired_control_vigilance",
+                "participant_id": str(row["participant_id"]),
+                "session_id": str(row["session_id"]),
+                "task_id": task_id,
+                "session_order": float(session_order.loc[index]),
+            }
+            any_feature = False
+            for output_column, input_column in mapping.items():
+                if input_column in clean.columns:
+                    output_row[output_column] = pd.to_numeric(
+                        row[input_column],
+                        errors="coerce",
+                    )
+                    any_feature = any_feature or pd.notna(output_row[output_column])
+            if any_feature:
+                rows.append(output_row)
+    long_frame = pd.DataFrame(rows)
+    feature_columns = sorted(
+        {
+            output_column
+            for mapping in PAIRED_SESSION_TASK_FEATURES.values()
+            for output_column in mapping
+        }
+    )
+    for column in feature_columns:
+        if column not in long_frame.columns:
+            long_frame[column] = np.nan
+    audit = pd.DataFrame(
+        [
+            {
+                "audit_item": "input_rows",
+                "value": int(frame.shape[0]),
+                "detail": "",
+            },
+            {
+                "audit_item": "rows_with_valid_identity",
+                "value": int(valid.sum()),
+                "detail": "",
+            },
+            {
+                "audit_item": "rows_excluded_missing_identity",
+                "value": int((~valid).sum()),
+                "detail": "participant_id_or_session_id_missing",
+            },
+            {
+                "audit_item": "forbidden_columns_excluded",
+                "value": int(len(forbidden_columns)),
+                "detail": ";".join(sorted(forbidden_columns)),
+            },
+            {
+                "audit_item": "session_level_rows_emitted",
+                "value": int(long_frame.shape[0]),
+                "detail": "one row per participant_session_task; no window semantics created",
+            },
+        ]
+    )
+    return long_frame, audit
 
 
 def canonicalise_empirical_window_table(frame: pd.DataFrame) -> pd.DataFrame:
@@ -321,6 +510,315 @@ def _flowzone_bool(frame: pd.DataFrame, column: str) -> pd.Series:
     if values.dtype == bool:
         return values.fillna(False)
     return values.astype(str).str.lower().isin({"true", "1", "yes"})
+
+
+def _paired_session_order(frame: pd.DataFrame) -> pd.Series:
+    if "session_type" in frame.columns:
+        mapped = frame["session_type"].astype(str).str.lower().map(
+            {
+                "online": 1.0,
+                "lab1": 2.0,
+                "lab_1": 2.0,
+                "laboratory1": 2.0,
+                "lab2": 3.0,
+                "lab_2": 3.0,
+                "laboratory2": 3.0,
+            }
+        )
+        if mapped.notna().any():
+            return mapped.fillna(
+                frame.groupby("participant_id", sort=True).cumcount().astype(float) + 1.0
+            )
+    return frame.groupby("participant_id", sort=True).cumcount().astype(float) + 1.0
+
+
+def _paired_session_support(
+    frame: pd.DataFrame,
+    features: tuple[str, ...],
+) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    for keys, group in frame.groupby(["source_dataset", "task_id"], sort=True):
+        source, task = keys
+        participant_sessions = group.groupby("participant_id", sort=True)["session_id"].nunique()
+        task_supported_features = tuple(PAIRED_SESSION_TASK_FEATURES[str(task)].keys())
+        coverages = [
+            float(pd.to_numeric(group[feature], errors="coerce").notna().mean())
+            for feature in task_supported_features
+        ]
+        rows.append(
+            {
+                "source_dataset": source,
+                "task_id": task,
+                "n_session_task_rows": int(group.shape[0]),
+                "n_participants": int(group["participant_id"].nunique()),
+                "n_sessions": int(group[["participant_id", "session_id"]].drop_duplicates().shape[0]),
+                "n_repeat_participants": int((participant_sessions >= 2).sum()),
+                "n_supported_features": int(len(task_supported_features)),
+                "feature_coverage_min": float(np.nanmin(coverages)) if coverages else float("nan"),
+                "feature_coverage_mean": float(np.nanmean(coverages)) if coverages else float("nan"),
+                "between_person_support": _support_label(int(group["participant_id"].nunique()), 2),
+                "session_variance_support": _support_label(int((participant_sessions >= 2).sum()), 1),
+                "practice_support": _support_label(int((participant_sessions >= 2).sum()), 1),
+                "window_level_support": "unsupported",
+                "window_level_reason": "paired_source_is_session_summary_not_window_table",
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _paired_session_feature_summary(
+    frame: pd.DataFrame,
+    features: tuple[str, ...],
+) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    for keys, group in frame.groupby(["source_dataset", "task_id"], sort=True):
+        source, task = keys
+        for feature in features:
+            values = pd.to_numeric(group[feature], errors="coerce")
+            rows.append(
+                {
+                    "source_dataset": source,
+                    "task_id": task,
+                    "feature": feature,
+                    "n_observed": int(values.notna().sum()),
+                    "missing_rate": float(values.isna().mean()),
+                    "mean": float(values.mean()),
+                    "sd": float(values.std(ddof=1)),
+                    "p10": float(values.quantile(0.10)),
+                    "p50": float(values.quantile(0.50)),
+                    "p90": float(values.quantile(0.90)),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _paired_session_variance(
+    frame: pd.DataFrame,
+    features: tuple[str, ...],
+) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    for keys, group in frame.groupby(["source_dataset", "task_id"], sort=True):
+        source, task = keys
+        participant_session_counts = group.groupby("participant_id", sort=True)["session_id"].nunique()
+        for feature in features:
+            values = pd.to_numeric(group[feature], errors="coerce")
+            observed = group.loc[:, ["participant_id", "session_id"]].copy()
+            observed["_value"] = values
+            observed = observed.dropna(subset=["_value"])
+            participant_means = observed.groupby("participant_id", sort=True)["_value"].mean()
+            session_baselines = observed.join(
+                participant_means.rename("participant_mean"),
+                on="participant_id",
+            )
+            session_deviation = (
+                session_baselines["_value"] - session_baselines["participant_mean"]
+            )
+            repeated_count = int((participant_session_counts >= 2).sum())
+            between = (
+                float(participant_means.var(ddof=1))
+                if participant_means.shape[0] > 1
+                else float("nan")
+            )
+            session_var = (
+                float(session_deviation.var(ddof=1))
+                if repeated_count > 0 and session_deviation.dropna().shape[0] > 1
+                else float("nan")
+            )
+            total = (
+                float(observed["_value"].var(ddof=1))
+                if observed.shape[0] > 1
+                else float("nan")
+            )
+            component_sum = np.nansum([between, session_var])
+            rows.append(
+                {
+                    "source_dataset": source,
+                    "task_id": task,
+                    "feature": feature,
+                    "n_observed": int(observed.shape[0]),
+                    "n_participants": int(observed["participant_id"].nunique()),
+                    "n_repeat_participants": repeated_count,
+                    "total_variance": total,
+                    "between_participant_variance": between,
+                    "session_within_participant_variance": session_var,
+                    "between_participant_fraction": _safe_fraction(between, component_sum),
+                    "session_within_participant_fraction": _safe_fraction(
+                        session_var,
+                        component_sum,
+                    ),
+                    "between_support_status": _support_label(participant_means.shape[0], 2),
+                    "session_support_status": (
+                        _support_label(repeated_count, 1)
+                        if observed.shape[0] >= 2 and participant_means.shape[0] > 0
+                        else "unsupported"
+                    ),
+                    "window_support_status": "unsupported",
+                    "support_reason": (
+                        "participants_with_repeated_sessions"
+                        if repeated_count and observed.shape[0] >= 2
+                        else "feature_structurally_unavailable_for_task"
+                        if observed.shape[0] == 0
+                        else "no_repeated_sessions_for_this_task"
+                    ),
+                    "estimation_method": "paired_session_mean_deviation_variance_v1",
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _paired_session_covariance(
+    frame: pd.DataFrame,
+    features: tuple[str, ...],
+    *,
+    level: str,
+) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    for keys, group in frame.groupby(["source_dataset", "task_id"], sort=True):
+        source, task = keys
+        matrix = group.loc[:, list(features)].apply(pd.to_numeric, errors="coerce")
+        if level == "between_person":
+            units = matrix.join(group["participant_id"]).groupby("participant_id", sort=True)[
+                list(features)
+            ].mean()
+            support_status = _support_label(units.shape[0], 2)
+            support_reason = "participant_mean_covariance"
+        elif level == "session":
+            participant_means = matrix.join(group["participant_id"]).groupby(
+                "participant_id",
+                sort=True,
+            )[list(features)].transform("mean")
+            units = matrix - participant_means
+            repeat_count = int(
+                (group.groupby("participant_id", sort=True)["session_id"].nunique() >= 2).sum()
+            )
+            support_status = _support_label(repeat_count, 1)
+            support_reason = (
+                "session_deviations_from_participant_baseline"
+                if repeat_count
+                else "no_repeated_sessions_for_this_task"
+            )
+        else:
+            raise ValueError(f"unknown paired covariance level: {level}")
+        for feature_a in features:
+            for feature_b in features:
+                pair = units.loc[:, [feature_a, feature_b]].dropna()
+                rows.append(
+                    {
+                        "source_dataset": source,
+                        "task_id": task,
+                        "covariance_level": level,
+                        "feature_a": feature_a,
+                        "feature_b": feature_b,
+                        "n_units": int(pair.shape[0]),
+                        "support_status": (
+                            support_status if pair.shape[0] >= 2 else "unsupported"
+                        ),
+                        "support_reason": (
+                            support_reason
+                            if pair.shape[0] >= 2
+                            else "fewer_than_two_complete_units_for_feature_pair"
+                        ),
+                        "covariance": (
+                            float(pair.cov().iloc[0, 1])
+                            if pair.shape[0] >= 2
+                            else float("nan")
+                        ),
+                        "correlation": _pair_correlation(pair),
+                    }
+                )
+    return pd.DataFrame(rows)
+
+
+def _paired_session_practice(
+    frame: pd.DataFrame,
+    features: tuple[str, ...],
+) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    for keys, group in frame.groupby(["source_dataset", "task_id"], sort=True):
+        source, task = keys
+        for feature in features:
+            slopes: list[float] = []
+            for _, participant_group in group.groupby("participant_id", sort=True):
+                x = pd.to_numeric(participant_group["session_order"], errors="coerce")
+                y = pd.to_numeric(participant_group[feature], errors="coerce")
+                valid = x.notna() & y.notna()
+                if int(valid.sum()) < 2 or float(np.std(x[valid])) == 0:
+                    continue
+                slopes.append(
+                    float(
+                        np.polyfit(
+                            x[valid].to_numpy(dtype=float),
+                            y[valid].to_numpy(dtype=float),
+                            deg=1,
+                        )[0]
+                    )
+                )
+            rows.append(
+                {
+                    "source_dataset": source,
+                    "task_id": task,
+                    "feature": feature,
+                    "practice_usable_participants": int(len(slopes)),
+                    "practice_mean_slope": float(np.mean(slopes)) if slopes else float("nan"),
+                    "practice_median_slope": float(np.median(slopes)) if slopes else float("nan"),
+                    "practice_sd_slope": (
+                        float(np.std(slopes, ddof=1)) if len(slopes) > 1 else float("nan")
+                    ),
+                    "practice_support_status": "estimated" if slopes else "unsupported",
+                    "practice_support_reason": (
+                        "participants_with_repeated_sessions"
+                        if slopes
+                        else "no_repeated_sessions_with_observed_feature"
+                    ),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _paired_cross_task_covariance(
+    frame: pd.DataFrame,
+    features: tuple[str, ...],
+) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    for feature in features:
+        wide = frame.pivot_table(
+            index=["participant_id", "session_id"],
+            columns="task_id",
+            values=feature,
+            aggfunc="mean",
+        )
+        for task_a in wide.columns:
+            for task_b in wide.columns:
+                pair = wide.loc[:, [task_a, task_b]].dropna()
+                rows.append(
+                    {
+                        "source_dataset": "paired_control_vigilance",
+                        "feature": feature,
+                        "task_a": str(task_a),
+                        "task_b": str(task_b),
+                        "n_sessions": int(pair.shape[0]),
+                        "support_status": (
+                            "estimated" if pair.shape[0] >= 2 else "unsupported"
+                        ),
+                        "covariance": (
+                            float(pair.cov().iloc[0, 1])
+                            if pair.shape[0] >= 2
+                            else float("nan")
+                        ),
+                        "correlation": _pair_correlation(pair),
+                    }
+                )
+    return pd.DataFrame(rows)
+
+
+def _pair_correlation(pair: pd.DataFrame) -> float:
+    if pair.shape[0] < 2:
+        return float("nan")
+    first = pair.iloc[:, 0]
+    second = pair.iloc[:, 1]
+    if float(first.std(ddof=1)) <= 0 or float(second.std(ddof=1)) <= 0:
+        return float("nan")
+    return float(pair.corr().iloc[0, 1])
 
 
 def _template_summary(frame: pd.DataFrame, features: tuple[str, ...]) -> pd.DataFrame:
@@ -1025,6 +1523,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Canonical empirical window table path; may be supplied more than once.",
     )
     parser.add_argument(
+        "--paired-session-table",
+        action="append",
+        default=None,
+        help=(
+            "Paired Stroop-Flanker-SART session-level table for repeated-session "
+            "background only; may be supplied more than once."
+        ),
+    )
+    parser.add_argument(
         "--no-fallback-fixture",
         action="store_true",
         help="Fail if no empirical input table is supplied.",
@@ -1034,6 +1541,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         config_path=args.config,
         output_dir=args.output_dir,
         input_tables=args.input_table,
+        paired_session_tables=args.paired_session_table,
         allow_fallback_fixture=not args.no_fallback_fixture,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
