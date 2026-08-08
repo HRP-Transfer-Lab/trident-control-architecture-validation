@@ -1,12 +1,12 @@
 # M2.7 Empirical-Twin Preflight
 
-**Status:** strengthened preflight scaffold; real ACDC input not yet present locally
+**Status:** strengthened preflight scaffold; first bounded ACDC empirical-background preflight completed
 **Static contract:** `static_tournament_v2`  
 **Config:** `config/empirical_twin_preflight_v1.yaml`
 
 ## Purpose
 
-M2.7 remains a known-truth experiment. Empirical data are used only to estimate nuisance structure:
+M2.7 remains a known-truth experiment. Empirical data are used only to estimate empirical background structure:
 
 ```text
 between-person variance
@@ -18,6 +18,10 @@ trial counts
 missingness
 source/task shifts
 ```
+
+For the M2.7 static architecture-recovery question, these empirical background
+quantities function statistically as nuisance parameters because they are not
+the known latent structural truth being adjudicated.
 
 The empirical tables must not provide latent profile/state truth.
 
@@ -38,7 +42,9 @@ M3
 M4
 ```
 
-The main preflight question is whether the nuisance extraction pipeline can produce stable, source/task-specific templates without changing the known synthetic truth definitions.
+The main preflight question is whether the empirical-background extraction
+pipeline can produce stable, source/task-specific templates without changing
+the known synthetic truth definitions.
 
 ## Preflight Gates
 
@@ -86,9 +92,9 @@ reports/generated/empirical_twin_preflight_v1/empirical_twin_preflight_report.md
 
 This validates the nuisance-extraction path. It does not test model recovery and should not be interpreted scientifically.
 
-## Strengthened Nuisance Decomposition
+## Strengthened Empirical Background Decomposition
 
-The preflight now separates nuisance structure into explicit support-checked
+The preflight now separates empirical background structure into explicit support-checked
 levels:
 
 ```text
@@ -128,7 +134,7 @@ research/flow-zone-zone-validation/data/processed/cognitive_windows.parquet
 
 That file is derived from the GitHub-hosted ACDC database release used by the Flow Zone validation pipeline. The preflight runner now adapts Flow Zone cognitive-window columns into the canonical M2.7 window schema before validation.
 
-## ACDC Input Search And Blocker
+## ACDC Input Regeneration And First Real Preflight
 
 Local search on the current workstation found the Flow Zone repository at:
 
@@ -143,7 +149,7 @@ repository: HRP-Transfer-Lab/flow-zone-zone-validation
 commit: 2d8d479befd73155d2215c1fef80a60cd27eaa5b
 ```
 
-The intended ACDC nuisance input was not present:
+The intended ACDC empirical-background input was initially not present:
 
 ```text
 data/processed/cognitive_windows.parquet
@@ -184,9 +190,112 @@ release metadata showed `initial-release` as the latest release, published
 `acdcquery::check_acdc()` and records release tag, published time, SHA-256,
 package versions and manifest metadata.
 
-Until `data/processed/cognitive_windows.parquet` exists locally, the real ACDC
-nuisance preflight is blocked. No fallback fixture result should be described
-as an empirical nuisance run.
+After restoring the Flow Zone Python and R environments, the bounded Flow Zone
+pipeline generated:
+
+```text
+C:\Users\admin\OneDrive\Documents\GitHub\trident-g-platform\research\flow-zone-zone-validation\data\processed\cognitive_windows.parquet
+```
+
+The first real ACDC empirical-background preflight then completed:
+
+```text
+input_mode: empirical_window_tables
+rows: 7882
+participants: 240
+sessions: 240
+sources: 12
+tasks: 3
+source/task templates: 12
+runtime: 19.477 seconds
+formal_claims_allowed: false
+model_recovery_performed: false
+```
+
+Input provenance recorded by the preflight:
+
+```text
+input checksum:
+sha256:f63344861fe984db85c7ff0816a9c8aca712a38d4af440260cffa604164d9d66
+
+Flow Zone repository:
+HRP-Transfer-Lab/flow-zone-zone-validation
+
+Flow Zone commit:
+2d8d479befd73155d2215c1fef80a60cd27eaa5b
+
+validation repository commit:
+64c9ae6d86c334a9e3ec74a923cba435812e87d0
+```
+
+Generated aggregate outputs:
+
+```text
+reports/generated/empirical_twin_preflight_v1/template_summary.csv
+reports/generated/empirical_twin_preflight_v1/template_support.csv
+reports/generated/empirical_twin_preflight_v1/feature_summary.csv
+reports/generated/empirical_twin_preflight_v1/variance_decomposition.csv
+reports/generated/empirical_twin_preflight_v1/covariance_raw.csv
+reports/generated/empirical_twin_preflight_v1/covariance_between_person.csv
+reports/generated/empirical_twin_preflight_v1/covariance_session.csv
+reports/generated/empirical_twin_preflight_v1/covariance_within_session.csv
+reports/generated/empirical_twin_preflight_v1/temporal_summary.csv
+reports/generated/empirical_twin_preflight_v1/missingness_summary.csv
+reports/generated/empirical_twin_preflight_v1/empirical_twin_preflight_summary.json
+reports/generated/empirical_twin_preflight_v1/empirical_twin_preflight_provenance.json
+reports/generated/empirical_twin_preflight_v1/empirical_twin_preflight_report.md
+```
+
+These generated reports are aggregate/local artefacts. The participant-level
+ACDC table remains outside Git.
+
+## First ACDC Support Findings
+
+The bounded ACDC development extract is useful for source/task-specific
+between-person and within-session empirical background structure, but it is not
+a repeated-session dataset:
+
+```text
+n participants: 240
+n sessions: 240
+n repeat participants: 0 in every source/task template
+```
+
+Immediate support implications:
+
+```text
+between-person variance/covariance: supported
+session-within-participant variance/covariance: unsupported in this bounded extract
+window-within-session variance/covariance: mostly supported
+lag-1 autocorrelation: mostly supported
+across-session practice slopes: unsupported
+within-session fatigue/time-on-task slopes: mostly supported
+```
+
+Template support:
+
+```text
+12 source/task templates
+20 participants per template
+65 to 1454 windows per template
+feature coverage minimum: 0.981 to 1.000
+```
+
+The smallest template was source `3` / task `Simon` with 65 windows. This is
+adequate for a first bounded plumbing run but should be reviewed before it is
+treated as an independent empirical-background template.
+
+Missingness was low. The largest observed missingness was in source `52` /
+task `Stroop`, where `median_rt_ms`, `mean_response_speed`, `rt_cv`, and
+`throughput_proxy` each had 28 missing rows:
+
+```text
+28 / 1454 = 0.0193
+```
+
+No M0/M1/M2_EM/M3/M4 model fitting or empirical-twin recovery was performed.
+No APC, PACE, Trident-state or brain-critical-zone inference was made from
+these empirical background estimates.
 
 ## Second Development Source Audit
 
