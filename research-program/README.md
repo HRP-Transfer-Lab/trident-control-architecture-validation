@@ -17,6 +17,23 @@ synthetic identifiability and falsification
 
 It defines the working variable architecture (`K, V, C, A, T, PC, R, P, Y, Transfer`) and the revised M2.6–M10 milestone sequence.
 
+### `TRIDENT_G_EMPIRICAL_COMPUTATIONAL_TEST_OVERVIEW.md`
+
+Explains why the programme is a strong empirical and computational test of Trident-G rather than a search for confirmatory patterns.
+
+It summarises:
+
+```text
+Trident-G theory
+→ explicit candidate variables and timescales
+→ synthetic known-truth falsification
+→ public-database model constraint
+→ prospective wrapper-swap prediction
+→ randomised mechanism-targeted intervention tests
+```
+
+It also makes explicit that specific theoretical commitments may fail independently: a literal cusp may fail while a continuous adaptive/off-critical regime survives; discrete states may fail while dynamic structure survives; PACE categories may prove to be useful phenotypes of continuous APC space rather than independent natural kinds.
+
 ### `COMPUTATIONAL_BUDGET_AND_EXECUTION_V1.md`
 
 Defines the computational execution strategy:
@@ -33,7 +50,7 @@ The compute strategy is intended to reduce unnecessary model fits and avoid long
 
 ## Operating rule
 
-Read both documents before implementing or launching a new milestone.
+Read all three documents before implementing or launching a new milestone.
 
 Where scientific ambition and computational cost conflict:
 
@@ -43,4 +60,4 @@ Where scientific ambition and computational cost conflict:
 4. use pre-registered sequential precision or adaptive stress-boundary designs for future experiments where valid;
 5. escalate to richer models only when simpler alternatives fail the relevant gate.
 
-`AGENTS.md` makes these requirements mandatory for Codex work in this repository.
+`AGENTS.md` makes the scientific and computational requirements mandatory for Codex work in this repository.
