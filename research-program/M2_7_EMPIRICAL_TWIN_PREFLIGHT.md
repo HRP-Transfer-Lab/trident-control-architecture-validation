@@ -297,6 +297,126 @@ No M0/M1/M2_EM/M3/M4 model fitting or empirical-twin recovery was performed.
 No APC, PACE, Trident-state or brain-critical-zone inference was made from
 these empirical background estimates.
 
+## Full ACDC Empirical Background Preflight
+
+The full ACDC Flow Zone window table initially failed canonical validation
+because five rows lacked `participant_id`. These rows were not assigned
+synthetic identifiers. They were excluded into a local filtered input with an
+explicit audit:
+
+```text
+audit:
+C:\trident-runs\M2.7\inputs\acdc_full_identity_exclusion_audit.json
+
+input rows: 117904
+output rows: 117899
+excluded rows with missing participant_id: 5
+excluded source/task: dataset 59 / Stroop
+```
+
+The filtered participant-identity-valid full ACDC input was:
+
+```text
+C:\trident-runs\M2.7\inputs\acdc_full_identity_valid_cognitive_windows.parquet
+```
+
+The full ACDC empirical-background preflight completed:
+
+```text
+input_mode: empirical_window_tables
+rows: 117899
+participants: 9152
+sessions: 9152
+sources: 57
+tasks: 3
+source/task templates: 57
+runtime: 125.798 seconds
+formal_claims_allowed: false
+model_recovery_performed: false
+```
+
+Input checksum recorded by the preflight:
+
+```text
+sha256:a2ff99c78517df555f9ba3636b0398f2c72cb60f43c2abf71905b6732b2a9172
+```
+
+Generated aggregate outputs:
+
+```text
+reports/generated/empirical_twin_preflight_v1_full_acdc/template_summary.csv
+reports/generated/empirical_twin_preflight_v1_full_acdc/template_support.csv
+reports/generated/empirical_twin_preflight_v1_full_acdc/feature_summary.csv
+reports/generated/empirical_twin_preflight_v1_full_acdc/variance_decomposition.csv
+reports/generated/empirical_twin_preflight_v1_full_acdc/covariance_raw.csv
+reports/generated/empirical_twin_preflight_v1_full_acdc/covariance_between_person.csv
+reports/generated/empirical_twin_preflight_v1_full_acdc/covariance_session.csv
+reports/generated/empirical_twin_preflight_v1_full_acdc/covariance_within_session.csv
+reports/generated/empirical_twin_preflight_v1_full_acdc/temporal_summary.csv
+reports/generated/empirical_twin_preflight_v1_full_acdc/missingness_summary.csv
+reports/generated/empirical_twin_preflight_v1_full_acdc/empirical_twin_preflight_summary.json
+reports/generated/empirical_twin_preflight_v1_full_acdc/empirical_twin_preflight_provenance.json
+reports/generated/empirical_twin_preflight_v1_full_acdc/empirical_twin_preflight_report.md
+```
+
+Full ACDC support findings:
+
+```text
+templates: 57
+minimum template size: 102 windows / 51 participants
+median template size: 882 windows / 132 participants
+maximum template size: 10583 windows
+repeat participants: 0
+```
+
+All 57 templates had between-person support. None had repeated-session support.
+Therefore ACDC should inform between-person, source/task, within-session/window,
+lag-1 and missingness/background quantities, but not session-to-session variance
+or across-session practice.
+
+Temporal support rows:
+
+```text
+lag-1 estimated, practice unsupported, fatigue estimated: 110
+lag-1 estimated, practice unsupported, fatigue unsupported: 70
+lag-1 unsupported, practice unsupported, fatigue unsupported: 105
+```
+
+Missingness remained low. The largest core-feature missingness was:
+
+```text
+dataset 35 / Stroop / rt_cv:
+4 / 102 = 0.0392
+```
+
+Bounded-to-full comparison:
+
+```text
+bounded templates: 12
+full templates: 57
+
+median between-person variance fraction:
+bounded 0.771
+full    0.920
+
+median window-within-session variance fraction:
+bounded 0.229
+full    0.080
+
+mean lag-1 autocorrelation:
+bounded 0.406
+full    0.406
+```
+
+The full run increases source/task coverage and precision. It also shows that
+the bounded subset underweighted the between-person share of variance relative
+to the full development extract. Lag-1 autocorrelation was stable on average.
+
+No model recovery was run after the full ACDC preflight. The next scientific
+decision is whether to build a separate paired Stroop-Flanker-SART adapter for
+repeated-session empirical background quantities before freezing
+`EMPIRICAL_BACKGROUND_CONTRACT_V1`.
+
 ## Second Development Source Audit
 
 A local temporary Flow Zone replication clone contains:
