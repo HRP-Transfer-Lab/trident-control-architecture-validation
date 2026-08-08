@@ -1,0 +1,109 @@
+version: computational-budget-v1
+
+principles:
+  - never_hide_scientific_failures_for_compute_reasons
+  - engineering_optimisation_requires_numerical_equivalence_tests
+  - scientific_changes_require_versioned_protocol_amendment
+  - formal_runs_must_be_observable_checkpointed_and_resumable
+  - richer_models_run_only_after_simpler_registered_gates_fail
+
+run_profiles:
+  smoke:
+    purpose: code_and_end_to_end_validation
+    target_runtime_seconds: 120
+    default_replicates_per_world: 2
+    blocking_codex_allowed: true
+    progress_interval_seconds: 10
+    checkpoint_required: false
+    formal_claims_allowed: false
+
+  pilot:
+    purpose: detect_obvious_scientific_or_execution_failures
+    target_runtime_seconds: 600
+    default_replicates_per_world: 15
+    blocking_codex_allowed: true
+    progress_interval_seconds: 15
+    checkpoint_required: true
+    formal_claims_allowed: false
+
+  confirmatory:
+    purpose: registered_scientific_estimation
+    target_runtime_per_shard_seconds: 900
+    blocking_codex_allowed: false
+    progress_interval_seconds: 15
+    checkpoint_required: true
+    resume_required: true
+    clean_tree_required: true
+    immutable_seed_schedule_required: true
+    formal_claims_allowed: true
+
+execution:
+  codex_max_blocking_runtime_seconds: 300
+  preflight_required_above_seconds: 120
+  default_process_workers: 2
+  benchmark_max_process_workers: 4
+  blas_threads_per_worker: 1
+  environment:
+    OMP_NUM_THREADS: "1"
+    MKL_NUM_THREADS: "1"
+    OPENBLAS_NUM_THREADS: "1"
+  parallelisation_unit: independent_replicate
+  atomic_checkpoint_writes: true
+  preserve_failed_units_in_reports: true
+
+bulk_scoring:
+  default_mode: primary_only
+  required_primary_outputs:
+    - heldout_log_density
+    - model_selection_result
+    - replicate_metadata
+    - runtime
+  optional_diagnostics_run_when_registered:
+    - posterior_entropy
+    - component_matching
+    - latent_representation
+    - bic_aic
+    - detailed_plots
+
+future_sequential_precision_template:
+  status: template_not_automatic_for_existing_registered_runs
+  minimum_replicates: 30
+  batch_size: 20
+  target_ci_half_width: 0.10
+  maximum_replicates: 150
+  stop_only_for_prespecified_precision: true
+  never_stop_for_preferred_model_winning: true
+
+future_adaptive_stress_template:
+  status: template_not_automatic_for_existing_registered_runs
+  strategy:
+    - baseline
+    - worst_plausible_level
+    - intermediate_levels_only_if_boundary_location_is_needed
+  one_factor_at_a_time_default: true
+  report_all_tested_conditions: true
+
+m2_6_protection:
+  scientific_schedule_status: preserve_registered_design
+  allowed_without_protocol_change:
+    - vectorisation
+    - duplicate_likelihood_pass_removal
+    - batched_quadrature
+    - split_level_preprocessing_reuse_where_equivalent
+    - deterministic_sharding
+    - checkpoint_resume
+    - bounded_parallelism
+    - progress_reporting
+    - preflight_runtime_estimation
+    - primary_only_bulk_scoring_if_registered_selection_is_unchanged
+  requires_versioned_protocol_change:
+    - replicate_count
+    - stopping_rule
+    - sample_size
+    - stress_grid
+    - model_definition
+    - world_parameters
+    - seed_schedule
+    - split_policy
+    - primary_metric
+    - recovery_threshold
