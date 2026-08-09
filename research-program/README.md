@@ -76,6 +76,17 @@ Its first machine-readable pre-outcome scaffold is
 `config/mechanistic_identifiability_v1.yaml`, validated by
 `trident_validation.mechanistic.identifiability_plan`.
 
+The first engineering smoke is
+`trident_validation.mechanistic.k_apc_smoke`, restricted to the
+`K_only_vs_APC` gate and labelled as generator/scoring-plumbing evidence only.
+
+### `M2_8_K_APC_SMOKE.md`
+
+Records the bounded engineering smoke for the first M2.8 gate. It verifies
+deterministic MECH0/MECH1 generation, participant-isolated splitting,
+truth-column stripping and variable audits, while explicitly disallowing
+scientific interpretation of the placeholder rank-based scorer.
+
 ### `M3_VARIABLE_ARCHITECTURE_V2.md`
 
 Freezes the Trident/HRP Stack variable architecture for mechanistic synthetic

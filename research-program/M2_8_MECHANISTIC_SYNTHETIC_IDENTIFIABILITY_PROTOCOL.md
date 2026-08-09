@@ -318,6 +318,30 @@ real transfer outcomes remaining uninspected;
 literal cusp/bifurcation remaining a later registered competitor only.
 ```
 
+## First Engineering Smoke
+
+The first bounded M2.8 implementation target is the `K_only_vs_APC` gate only:
+
+```text
+MECH0 general capacity only
+MECH1 static continuous APC
+```
+
+The corresponding smoke module is:
+
+```text
+trident_validation.mechanistic.k_apc_smoke
+```
+
+This smoke may generate known-truth synthetic `K` and APC variables, write
+truth-column audits, strip all `synthetic_*` fields before scoring, and exercise
+a placeholder rank-based scoring scaffold. The placeholder scorer is not the
+frozen M2.8 model tournament and its winners must not be interpreted as
+scientific evidence. Its purpose is to validate deterministic generation,
+participant-isolated splitting, truth-leakage protection and basic
+target-versus-realised variable auditing before richer mechanistic models are
+implemented.
+
 ## Downstream Empirical Roadmap
 
 If M2.8 supports mechanistic identifiability, the next empirical programme is:
