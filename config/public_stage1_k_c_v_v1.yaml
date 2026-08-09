@@ -1,0 +1,127 @@
+analysis:
+  id: public_stage1_k_c_v_v1
+  milestone: M5_stage1_K_C_signal_vigilance
+  status: pre_outcome_registered_analysis
+  question: Can control and readiness be separated?
+  formal_claims_allowed: false
+  trident_validation_claim_allowed: false
+  transfer_outcomes_allowed: false
+  pace_allowed: false
+  dynamic_regime_allowed: false
+  neural_criticality_claim_allowed: false
+  cusp_claim_allowed: false
+
+inputs:
+  paired_session_features_path: ../.tmp-zone-replication/flow-zone-zone-validation/data/processed/paired_vigilance_session_features.parquet
+  paired_session_features_sha256: DD30838E96FBC1A80C42D0CD41161644B1563BCCC3901B39AB9E9A1DED0065A0
+  upstream_repository: HRP-Transfer-Lab/flow-zone-zone-validation
+  upstream_commit: 2d8d479befd73155d2215c1fef80a60cd27eaa5b
+  upstream_processed_generation_commit: e7e68aaaa18d56f46b53de6623c83f2ab5e532ed
+
+identity_columns:
+  participant_id: participant_id
+  session_id: session_id
+  session_order: session_type
+  session_order_values:
+    online: 0
+    lab1: 1
+    lab2: 2
+
+forbidden_columns:
+  - low_engagement_candidate
+  - high_engagement_candidate
+  - control_profile
+  - control_profile_probability
+
+feature_groups:
+  K:
+    description: current-session general task performance; conflict costs and SART vigilance excluded
+    columns:
+      stroop_accuracy: 1
+      flanker_accuracy: 1
+      stroop_mean_rt_ms: -1
+      flanker_mean_rt_ms: -1
+      stroop_throughput: 1
+      flanker_throughput: 1
+  C_signal:
+    description: current-session conflict-control costs; lower costs are better
+    columns:
+      stroop_interference_rt_ms: -1
+      flanker_interference_rt_ms: -1
+      stroop_interference_accuracy: -1
+      flanker_interference_accuracy: -1
+  V:
+    description: current-session SART vigilance/readiness instability; lower failure rates/variability are better
+    columns:
+      sart_commission_rate: -1
+      sart_omission_rate: -1
+      sart_anticipatory_rate: -1
+      sart_go_rt_cv: -1
+      sart_pre_failure_speeding_ms: -1
+
+pairing:
+  adjacent_sessions_only: true
+  minimum_observed_sessions_per_participant: 2
+
+validation:
+  participant_isolated: true
+  n_folds: 5
+  split_seed: 20260809
+  ridge_alpha: 1.0
+  bootstrap_seed: 20260810
+  bootstrap_iterations: 1000
+  ci: 0.95
+
+candidate_models:
+  K_only:
+    predictors:
+      - K
+  K_plus_C_signal:
+    predictors:
+      - K
+      - C_signal
+  K_plus_V:
+    predictors:
+      - K
+      - V
+  K_plus_C_signal_plus_V:
+    predictors:
+      - K
+      - C_signal
+      - V
+  K_plus_C_signal_by_V:
+    predictors:
+      - K
+      - C_signal
+      - V
+      - C_signal_by_V
+
+targets:
+  C_signal_next:
+    group: C_signal
+    primary_increment: K_plus_C_signal_minus_K_only
+  V_next:
+    group: V
+    primary_increment: K_plus_V_minus_K_only
+  K_next:
+    group: K
+    primary_increment: K_plus_C_signal_plus_V_minus_K_only
+
+decision_rule:
+  status_values:
+    - separation_supported
+    - separation_not_supported
+    - inconclusive
+  require_no_forbidden_columns_used: true
+  require_participant_isolated_scores_finite: true
+  residual_variance_fraction_minimum_for_support: 0.20
+  residual_abs_correlation_maximum_for_support: 0.80
+  unique_increment_ci_lower_tolerance: -0.005
+  unique_increment_mean_minimum: 0.0
+  disconfirm_residual_variance_fraction_maximum: 0.10
+  disconfirm_residual_abs_correlation_minimum: 0.95
+  disconfirm_increment_ci_upper_maximum: 0.0
+
+outputs:
+  output_dir: reports/generated/public_stage1_k_c_v_v1
+  report_md: research-program/M5_STAGE1_K_C_V_REAL_DATA_ANALYSIS.md
