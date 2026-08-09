@@ -12,7 +12,7 @@ analysis:
   cusp_claim_allowed: false
 
 inputs:
-  paired_session_features_path: ../.tmp-zone-replication/flow-zone-zone-validation/data/processed/paired_vigilance_session_features.parquet
+  paired_session_features_path: ../../.tmp-zone-replication/flow-zone-zone-validation/data/processed/paired_vigilance_session_features.parquet
   paired_session_features_sha256: DD30838E96FBC1A80C42D0CD41161644B1563BCCC3901B39AB9E9A1DED0065A0
   upstream_repository: HRP-Transfer-Lab/flow-zone-zone-validation
   upstream_commit: 2d8d479befd73155d2215c1fef80a60cd27eaa5b

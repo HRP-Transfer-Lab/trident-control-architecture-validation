@@ -37,6 +37,16 @@ def test_stage1_config_is_claim_bounded_and_uses_only_k_c_v():
     assert configured_columns.isdisjoint(config["forbidden_columns"])
 
 
+def test_stage1_registered_local_source_path_resolves_when_available():
+    config = load_yaml_config(CONFIG_PATH)
+    source_path = (ROOT / config["inputs"]["paired_session_features_path"]).resolve()
+
+    if source_path.exists():
+        assert hash_file(source_path).lower() == (
+            "sha256:" + config["inputs"]["paired_session_features_sha256"].lower()
+        )
+
+
 def test_stage1_rejects_forbidden_profile_column_as_feature():
     config = load_yaml_config(CONFIG_PATH)
     config["feature_groups"]["K"]["columns"]["control_profile"] = 1
