@@ -324,7 +324,24 @@ def test_frozen_lag1_calibration_recovers_short_sequence_estimand():
     )
 
     assert abs(realised - target) <= 0.03
-    assert -0.95 <= phi <= 0.95
+    assert -empirical_twin_v1.INTERNAL_AR_PHI_BOUND <= phi <= empirical_twin_v1.INTERNAL_AR_PHI_BOUND
+
+    high_target = 0.62
+    high_phi = empirical_twin_v1._calibrate_internal_phi_for_frozen_lag1(
+        high_target,
+        fatigue_slope=0.01,
+        target_window_variance=1.0,
+        windows_per_session=16,
+    )
+    high_realised = empirical_twin_v1._expected_frozen_lag1_for_phi(
+        high_phi,
+        fatigue_slope=0.01,
+        target_window_variance=1.0,
+        windows_per_session=16,
+    )
+
+    assert abs(high_realised - high_target) <= 0.03
+    assert abs(high_phi) < empirical_twin_v1.INTERNAL_AR_PHI_BOUND
 
 
 def test_window_ar_calibration_recovers_full_centred_covariance():

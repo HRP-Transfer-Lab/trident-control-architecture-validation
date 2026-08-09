@@ -27,7 +27,7 @@ generator:
   n_templates: 3
   participants_per_template: 8
   sessions_per_participant: 2
-  windows_per_session: 12
+  windows_per_session: 16
   use_covariance: true
   paired_cross_task_session_covariance: off
   source_task_shift_rule: template_mean_minus_full_acdc_feature_mean

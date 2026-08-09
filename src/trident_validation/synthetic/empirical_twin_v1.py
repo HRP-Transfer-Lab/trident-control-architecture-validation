@@ -52,6 +52,9 @@ TRIAL_COUNT_IMPLEMENTATION_STATUS = "truncated_normal_from_mean_sd_p10_p90_appro
 SESSION_CALIBRATION_RULE = "raw_session_covariance_scaled_by_m_over_m_minus_1_before_participant_centring"
 WINDOW_CALIBRATION_RULE = "full_ar_innovation_covariance_scaled_to_centred_window_covariance_after_fatigue_or_diagonal_fallback"
 LAG1_CALIBRATION_RULE = "deterministic_grid_calibration_of_internal_phi_to_frozen_short_sequence_pearson_estimand"
+INTERNAL_AR_PHI_BOUND = 0.99
+LAG1_CALIBRATION_GRID_POINTS = 201
+LAG1_CALIBRATION_TOLERANCE = 0.03
 M2_7_EMPIRICAL_TWIN_REGISTRY_VERSION = "m2_7_empirical_twin_world_registry_v1"
 
 EmpiricalTwinWorldId = Literal["ETW0", "ETW1", "ETW2", "ETW3", "ETW4"]
@@ -495,6 +498,19 @@ def generate_empirical_twin_dataset(
             target_window_cov=window_cov,
             windows_per_session=int(config["windows_per_session"]),
         )
+        calibrated_lag1_expected = _expected_frozen_lag1_map(
+            internal_phi,
+            fatigue=fatigue,
+            target_window_cov=window_cov,
+            windows_per_session=int(config["windows_per_session"]),
+        )
+        lag1_calibration_support = _lag1_calibration_support_rows(
+            lag1,
+            internal_phi=internal_phi,
+            calibrated_lag1_expected=calibrated_lag1_expected,
+            source=str(source),
+            task=task,
+        )
         window_cov, window_calibration_support = _calibrate_window_covariance_for_estimand(
             window_cov,
             internal_phi=internal_phi,
@@ -512,6 +528,7 @@ def generate_empirical_twin_dataset(
             + _stamp_support_rows(lag1_support, world_id, replicate_index)
             + _stamp_support_rows(fatigue_support, world_id, replicate_index)
             + _stamp_support_rows(missing_support, world_id, replicate_index)
+            + _stamp_support_rows(lag1_calibration_support, world_id, replicate_index)
             + _stamp_support_rows(window_calibration_support, world_id, replicate_index)
         )
         support_rows.append(
@@ -537,6 +554,7 @@ def generate_empirical_twin_dataset(
             window_cov=window_cov,
             internal_phi=internal_phi,
             frozen_lag1_target=lag1,
+            calibrated_lag1_expected=calibrated_lag1_expected,
             fatigue=fatigue if session_trend is False else fatigue,
             missingness=missingness,
             trial_counts=trial_counts,
@@ -1447,6 +1465,7 @@ def _apply_background_to_source(
     window_cov: np.ndarray,
     internal_phi: dict[str, float],
     frozen_lag1_target: dict[str, float],
+    calibrated_lag1_expected: dict[str, float],
     fatigue: dict[str, float],
     missingness: dict[str, float],
     trial_counts: dict[str, float],
@@ -1466,7 +1485,10 @@ def _apply_background_to_source(
     values = np.zeros((source_frame.shape[0], len(FEATURES)), dtype=float)
     source_positions = {index: pos for pos, index in enumerate(source_frame.index)}
     rho = np.array(
-        [np.clip(internal_phi.get(feature, 0.0), -0.95, 0.95) for feature in FEATURES],
+        [
+            np.clip(internal_phi.get(feature, 0.0), -INTERNAL_AR_PHI_BOUND, INTERNAL_AR_PHI_BOUND)
+            for feature in FEATURES
+        ],
         dtype=float,
     )
 
@@ -1520,6 +1542,10 @@ def _apply_background_to_source(
                                 "target_source_task_shift": shift_vector[feature_index],
                                 "frozen_lag1_target": frozen_lag1_target.get(feature, np.nan),
                                 "internal_ar_phi": rho[feature_index],
+                                "calibrated_frozen_lag1_expected": calibrated_lag1_expected.get(
+                                    feature,
+                                    np.nan,
+                                ),
                                 "structural_component": structural[pos, feature_index],
                                 "person_component": person_effects[participant_key][feature_index],
                                 "session_component": session_effects[session_key][feature_index],
@@ -2012,6 +2038,78 @@ def _calibrate_internal_phi_map(
     }
 
 
+def _expected_frozen_lag1_map(
+    internal_phi: dict[str, float],
+    *,
+    fatigue: dict[str, float],
+    target_window_cov: np.ndarray,
+    windows_per_session: int,
+) -> dict[str, float]:
+    return {
+        feature: _expected_frozen_lag1_for_phi(
+            _as_float(internal_phi.get(feature), default=0.0),
+            fatigue_slope=_as_float(fatigue.get(feature), default=0.0),
+            target_window_variance=max(float(target_window_cov[index, index]), 0.0),
+            windows_per_session=windows_per_session,
+        )
+        for index, feature in enumerate(FEATURES)
+    }
+
+
+def _lag1_calibration_support_rows(
+    frozen_lag1: dict[str, float],
+    *,
+    internal_phi: dict[str, float],
+    calibrated_lag1_expected: dict[str, float],
+    source: str,
+    task: str,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for feature in FEATURES:
+        target = _as_float(frozen_lag1.get(feature), default=float("nan"))
+        realised = _as_float(calibrated_lag1_expected.get(feature), default=float("nan"))
+        phi = _as_float(internal_phi.get(feature), default=float("nan"))
+        if not np.isfinite(target) or not np.isfinite(realised):
+            rows.append(
+                _support_row(
+                    feature,
+                    0,
+                    "internal_lag1_calibration",
+                    "unsupported",
+                    "non_finite_target_or_calibrated_estimator",
+                    source_dataset=source,
+                    task_id=task,
+                    fallback_type="fixed_neutral_value",
+                )
+            )
+            continue
+        delta = abs(realised - target)
+        at_boundary = abs(abs(phi) - INTERNAL_AR_PHI_BOUND) <= 1e-12
+        status = "calibrated"
+        detail = f"frozen_estimator_delta={delta:.6g}; internal_phi={phi:.6g}"
+        fallback_type = ""
+        if delta > LAG1_CALIBRATION_TOLERANCE or at_boundary:
+            status = "boundary_best_effort"
+            detail = (
+                f"{detail}; calibration_tolerance={LAG1_CALIBRATION_TOLERANCE:.6g}; "
+                f"target_may_be_outside_sequence_design_range"
+            )
+            fallback_type = "boundary_internal_phi"
+        rows.append(
+            _support_row(
+                feature,
+                0,
+                "internal_lag1_calibration",
+                status,
+                detail,
+                source_dataset=source,
+                task_id=task,
+                fallback_type=fallback_type,
+            )
+        )
+    return rows
+
+
 @lru_cache(maxsize=2048)
 def _calibrate_internal_phi_for_frozen_lag1(
     target_lag1: float,
@@ -2022,8 +2120,12 @@ def _calibrate_internal_phi_for_frozen_lag1(
 ) -> float:
     if not np.isfinite(target_lag1) or windows_per_session < 3 or target_window_variance <= 0:
         return 0.0
-    target = float(np.clip(target_lag1, -0.95, 0.95))
-    grid = np.linspace(-0.95, 0.95, 101)
+    target = float(np.clip(target_lag1, -INTERNAL_AR_PHI_BOUND, INTERNAL_AR_PHI_BOUND))
+    grid = np.linspace(
+        -INTERNAL_AR_PHI_BOUND,
+        INTERNAL_AR_PHI_BOUND,
+        LAG1_CALIBRATION_GRID_POINTS,
+    )
     estimates = np.array(
         [
             _expected_frozen_lag1_for_phi(
@@ -2038,7 +2140,7 @@ def _calibrate_internal_phi_for_frozen_lag1(
     )
     valid = np.isfinite(estimates)
     if not valid.any():
-        return float(np.clip(target, -0.8, 0.8))
+        return float(np.clip(target, -INTERNAL_AR_PHI_BOUND, INTERNAL_AR_PHI_BOUND))
     best_index = int(np.nanargmin(np.abs(estimates[valid] - target)))
     valid_grid = grid[valid]
     return float(valid_grid[best_index])
@@ -2121,7 +2223,10 @@ def _calibrate_window_covariance_for_estimand(
     if windows_per_session < 2 or np.allclose(target_cov, 0.0):
         return target_cov, []
     phi = np.array(
-        [np.clip(internal_phi.get(feature, 0.0), -0.95, 0.95) for feature in FEATURES],
+        [
+            np.clip(internal_phi.get(feature, 0.0), -INTERNAL_AR_PHI_BOUND, INTERNAL_AR_PHI_BOUND)
+            for feature in FEATURES
+        ],
         dtype=float,
     )
     slopes = np.array([fatigue.get(feature, 0.0) for feature in FEATURES], dtype=float)
