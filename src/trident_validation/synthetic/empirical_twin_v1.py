@@ -580,6 +580,7 @@ def generate_empirical_twin_dataset(
         templates=templates,
         world_id=world_id,
         replicate_index=replicate_index,
+        component_audit=pd.DataFrame(component_rows) if component_rows else None,
     )
     summary = {
         "run_id": run_id,
@@ -705,6 +706,7 @@ def build_generator_audit(
     templates: pd.DataFrame,
     world_id: str,
     replicate_index: int,
+    component_audit: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Compare target and realised background quantities for smoke auditing."""
 
@@ -716,17 +718,30 @@ def build_generator_audit(
             (generated["source_dataset"].astype(str) == source)
             & (generated["task_id"].astype(str) == task)
         ].copy()
+        source_task_components = _component_audit_slice(component_audit, source, task)
+        person_frame = _component_wide_frame(source_task_components, ["person_component"])
+        session_frame = _component_wide_frame(source_task_components, ["session_component"])
+        window_frame = _component_wide_frame(
+            source_task_components,
+            ["ar_component", "fatigue_component"],
+        )
+        person_session_frame = _component_wide_frame(
+            source_task_components,
+            ["person_component", "session_component"],
+        )
         if frame.empty:
             continue
         for feature in FEATURES:
             structural_column = f"synthetic_structural_{feature}"
             target_shift = _centred_source_task_shifts(background, template)[feature]
-            realised_shift = (
-                _as_float(frame[feature].mean(skipna=True))
-                - _as_float(frame[structural_column].mean(skipna=True), default=0.0)
-                if structural_column in frame
-                else float("nan")
-            )
+            realised_shift = _component_source_task_shift(source_task_components, feature)
+            if not np.isfinite(realised_shift):
+                realised_shift = (
+                    _as_float(frame[feature].mean(skipna=True))
+                    - _as_float(frame[structural_column].mean(skipna=True), default=0.0)
+                    if structural_column in frame
+                    else float("nan")
+                )
             rows.append(
                 _audit_row(
                     world_id,
@@ -772,7 +787,9 @@ def build_generator_audit(
                         feature=feature,
                         column="between_participant_variance",
                     ),
-                    _realised_between_variance(frame, feature),
+                    _realised_between_variance(person_frame, feature)
+                    if not person_frame.empty
+                    else _realised_between_variance(frame, feature),
                 )
             )
             rows.append(
@@ -784,7 +801,9 @@ def build_generator_audit(
                     "session_within_person_variance",
                     feature,
                     _paired_target_variance(background.paired_variance, task, feature),
-                    _realised_session_variance(frame, feature),
+                    _realised_session_variance(session_frame, feature)
+                    if not session_frame.empty
+                    else _realised_session_variance(frame, feature),
                 )
             )
             rows.append(
@@ -802,7 +821,9 @@ def build_generator_audit(
                         feature=feature,
                         column="window_within_session_variance",
                     ),
-                    _realised_window_variance(frame, feature),
+                    _realised_window_variance(window_frame, feature)
+                    if not window_frame.empty
+                    else _realised_window_variance(frame, feature),
                 )
             )
             rows.append(
@@ -820,7 +841,9 @@ def build_generator_audit(
                         feature=feature,
                         column="lag1_mean_autocorrelation",
                     ),
-                    _realised_lag1(frame, feature),
+                    _realised_lag1(window_frame, feature)
+                    if not window_frame.empty
+                    else _realised_lag1(frame, feature),
                 )
             )
             rows.append(
@@ -832,7 +855,9 @@ def build_generator_audit(
                     "repeated_person_stability",
                     feature,
                     _paired_target_stability(background.paired_stability, task, feature),
-                    _realised_repeated_person_stability(frame, feature),
+                    _realised_repeated_person_stability(person_session_frame, feature)
+                    if not person_session_frame.empty
+                    else _realised_repeated_person_stability(frame, feature),
                 )
             )
         rows.append(
@@ -848,6 +873,55 @@ def build_generator_audit(
             )
         )
     return pd.DataFrame(rows)
+
+
+def _component_audit_slice(
+    component_audit: pd.DataFrame | None,
+    source: str,
+    task: str,
+) -> pd.DataFrame:
+    if component_audit is None or component_audit.empty:
+        return pd.DataFrame()
+    return component_audit[
+        (component_audit["source_dataset"].astype(str) == str(source))
+        & (component_audit["task_id"].astype(str) == str(task))
+    ].copy()
+
+
+def _component_wide_frame(
+    component_audit: pd.DataFrame,
+    component_columns: Sequence[str],
+) -> pd.DataFrame:
+    if component_audit.empty:
+        return pd.DataFrame()
+    if any(column not in component_audit for column in component_columns):
+        return pd.DataFrame()
+    index_columns = [
+        "source_dataset",
+        "participant_id",
+        "session_id",
+        "window_id",
+        "window_start_trial",
+    ]
+    frame = component_audit.loc[:, [*index_columns, "feature", *component_columns]].copy()
+    frame["_component_value"] = frame.loc[:, component_columns].sum(axis=1)
+    wide = frame.pivot_table(
+        index=index_columns,
+        columns="feature",
+        values="_component_value",
+        aggfunc="first",
+    ).reset_index()
+    wide.columns.name = None
+    return wide
+
+
+def _component_source_task_shift(component_audit: pd.DataFrame, feature: str) -> float:
+    if component_audit.empty or "target_source_task_shift" not in component_audit:
+        return float("nan")
+    rows = component_audit[component_audit["feature"].astype(str) == str(feature)]
+    if rows.empty:
+        return float("nan")
+    return _as_float(rows["target_source_task_shift"].mean(skipna=True))
 
 
 def write_empirical_twin_v1_audit_diagnostics(
