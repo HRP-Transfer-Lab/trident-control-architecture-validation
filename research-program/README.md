@@ -72,6 +72,15 @@ capacity, vigilance, APC parameters, predictive calibration and temporary
 dynamic regime can be recovered and distinguished from simpler alternatives
 before any real wrapper-transfer outcomes are inspected.
 
+### `M3_VARIABLE_ARCHITECTURE_V2.md`
+
+Freezes the Trident/HRP Stack variable architecture for mechanistic synthetic
+design. Its machine-readable companion is
+`config/hrp_stack_variable_registry_v2.yaml`, which registers `K`, `V`,
+`C_signal`, `A_evidence`, `T_commit`, `PC_calibration`, `R_dynamic`,
+`P_pace`, `Y_behavior`, `Transfer_external` and the MECH0-MECH7 causal
+families for later identifiability testing.
+
 ## Operating rule
 
 Read all three documents before implementing or launching a new milestone.
