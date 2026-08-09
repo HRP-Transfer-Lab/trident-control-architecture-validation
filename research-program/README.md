@@ -48,6 +48,14 @@ It requires preflight/runtime estimation, visible progress, checkpoint/resume, b
 
 The compute strategy is intended to reduce unnecessary model fits and avoid long blocking Codex/VS Code runs **without altering registered scientific questions or hiding failures**.
 
+### `EMPIRICAL_BACKGROUND_CONTRACT_V1.md`
+
+Freezes the M2.7 empirical-background source-to-parameter mapping for later
+known-truth empirical-twin static recovery. It records ACDC and paired
+Stroop-Flanker-SART source roles, support thresholds, unsupported quantities,
+pooling/shrinkage rules and the decision to carry the online -> lab1 -> lab2
+trend only as a labelled session-order/context sensitivity setting.
+
 ## Operating rule
 
 Read all three documents before implementing or launching a new milestone.

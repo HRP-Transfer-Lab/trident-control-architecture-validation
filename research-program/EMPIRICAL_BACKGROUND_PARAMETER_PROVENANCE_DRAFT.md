@@ -1,8 +1,17 @@
 # Empirical Background Parameter Provenance Draft
 
-**Status:** draft for scientific review; not frozen  
-**Stage:** M2.7 empirical-twin preflight  
+**Status:** superseded by `EMPIRICAL_BACKGROUND_CONTRACT_V1.md`
+
+**Stage:** M2.7 empirical-twin preflight
+
 **Purpose:** record which development source may inform each empirical-background quantity before `EMPIRICAL_BACKGROUND_CONTRACT_V1` is frozen.
+
+The frozen source-to-parameter mapping, support thresholds, pooling rules and
+session-order/context decision are now recorded in:
+
+```text
+research-program/EMPIRICAL_BACKGROUND_CONTRACT_V1.md
+```
 
 ## Boundary
 
@@ -64,10 +73,18 @@ repeated-person stability now has an explicit estimator
 It also renamed across-session practice as a session-order/context trend unless
 the upstream source design review justifies a pure practice interpretation.
 
-## Open Decisions Before Freeze
+## Decisions Resolved In V1
 
-1. Whether sparse ACDC templates should remain separate or be partially pooled.
-2. Whether cross-task paired-session covariance should be used directly or only as a diagnostic.
-3. Whether bounded and full ACDC differences require robustness bands around variance fractions.
-4. How unsupported quantities are represented in the empirical-twin generator.
-5. Whether to include the paired source in `EMPIRICAL_BACKGROUND_CONTRACT_V1` now or after an independent adapter review.
+1. Sparse ACDC templates are retained and support-labelled; no automatic pooling
+   or shrinkage is authorised for primary V1 generation.
+2. Paired cross-task covariance is sensitivity/diagnostic only in V1, not a
+   primary generator parameter.
+3. Bounded ACDC is historical plumbing evidence; full ACDC is the primary ACDC
+   source for V1.
+4. Unsupported quantities must be represented explicitly as unsupported,
+   disabled, fixed neutral values or pre-registered sensitivity settings.
+5. The paired source is included for repeated-session quantities, with
+   repeat-participant-only estimators and excluded profile/probability/candidate
+   columns.
+6. The online -> lab1 -> lab2 trend is carried only as a
+   session-order/context sensitivity setting, not as pure practice.
