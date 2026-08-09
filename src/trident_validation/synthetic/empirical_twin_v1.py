@@ -79,6 +79,7 @@ class EmpiricalTwinRun:
     generator_audit: pd.DataFrame
     support_audit: pd.DataFrame
     generation_summary: dict[str, Any]
+    component_audit: pd.DataFrame | None = None
 
 
 def run_empirical_twin_v1_smoke(
@@ -167,6 +168,55 @@ def run_empirical_twin_v1_smoke(
     }
 
 
+def run_empirical_twin_v1_audit_diagnostics(
+    *,
+    config_path: str | Path = DEFAULT_CONFIG_PATH,
+    output_dir: str | Path | None = None,
+) -> dict[str, Any]:
+    """Run target-versus-realised audit diagnostics without tournament scoring."""
+
+    config_path = Path(config_path)
+    config = load_yaml_config(config_path)
+    _validate_config(config)
+    target_dir = Path(output_dir or config["outputs"]["directory"])
+    target_dir.mkdir(parents=True, exist_ok=True)
+    background = load_background_spec(
+        Path(config["inputs"]["acdc_preflight_dir"]),
+        Path(config["inputs"]["paired_preflight_dir"]),
+    )
+    generator_config = dict(config["generator"])
+    runs: list[EmpiricalTwinRun] = []
+    for world_id in tuple(str(world) for world in generator_config["worlds"]):
+        if world_id not in STATIC_SYNTHETIC_WORLD_IDS:
+            raise ValueError(f"unsupported empirical-twin world: {world_id}")
+        for replicate_index in range(int(generator_config["replicates_per_world"])):
+            print(
+                f"M2.7 target-realised audit diagnostics | {world_id} | replicate {replicate_index}",
+                flush=True,
+            )
+            runs.append(
+                generate_empirical_twin_dataset(
+                    world_id=world_id,  # type: ignore[arg-type]
+                    replicate_index=replicate_index,
+                    background=background,
+                    config={**generator_config, "capture_component_audit": True},
+                )
+            )
+    paths = write_empirical_twin_v1_audit_diagnostics(
+        runs,
+        background=background,
+        output_dir=target_dir,
+    )
+    return {
+        "study_id": str(config["study"]["id"]),
+        "diagnostic_scope": "target_realised_audit_only",
+        "model_outputs_read": False,
+        "tournament_scoring_run": False,
+        "n_generated_runs": len(runs),
+        "paths": {key: str(value) for key, value in paths.items()},
+    }
+
+
 def load_background_spec(acdc_dir: str | Path, paired_dir: str | Path) -> BackgroundSpec:
     """Load aggregate-only empirical-background preflight outputs."""
 
@@ -217,6 +267,7 @@ def generate_empirical_twin_dataset(
         max_windows_per_session=int(config["windows_per_session"]),
         technical_missingness_rate=0.0,
     )
+    base["synthetic_replicate_index"] = int(replicate_index)
     base_sources = sorted(base["source_dataset"].astype(str).unique())
     template_by_source = {
         source: templates.iloc[index % templates.shape[0]]
@@ -236,6 +287,7 @@ def generate_empirical_twin_dataset(
 
     generated = base.copy()
     support_rows: list[dict[str, Any]] = []
+    component_rows: list[dict[str, Any]] = []
     structural_fraction = float(config.get("structural_signal_fraction", 0.35))
     use_covariance = bool(config.get("use_covariance", True))
     session_trend = str(config.get("session_order_context_trend", "off")).lower() == "on"
@@ -310,6 +362,8 @@ def generate_empirical_twin_dataset(
         _apply_background_to_source(
             generated,
             source_index=source_index,
+            world_id=world_id,
+            replicate_index=replicate_index,
             means=means,
             between_cov=between_cov,
             session_cov=session_cov,
@@ -320,6 +374,9 @@ def generate_empirical_twin_dataset(
             trial_counts=trial_counts,
             structural_signal_fraction=structural_fraction,
             rng=rng,
+            component_rows=component_rows
+            if bool(config.get("capture_component_audit", False))
+            else None,
         )
 
     generated = _finalise_generated_bounds(generated)
@@ -361,6 +418,7 @@ def generate_empirical_twin_dataset(
         generator_audit=audit,
         support_audit=pd.DataFrame(support_rows),
         generation_summary=summary,
+        component_audit=pd.DataFrame(component_rows) if component_rows else None,
     )
 
 
@@ -572,6 +630,416 @@ def build_generator_audit(
     return pd.DataFrame(rows)
 
 
+def write_empirical_twin_v1_audit_diagnostics(
+    runs: Sequence[EmpiricalTwinRun],
+    *,
+    background: BackgroundSpec,
+    output_dir: Path,
+) -> dict[str, Path]:
+    """Write diagnostic-only target-realised audit summaries."""
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    component = pd.concat(
+        [
+            run.component_audit
+            for run in runs
+            if run.component_audit is not None and not run.component_audit.empty
+        ],
+        ignore_index=True,
+    )
+    generated = pd.concat([run.dataset for run in runs], ignore_index=True)
+    generator_audit = pd.concat([run.generator_audit for run in runs], ignore_index=True)
+    lag1 = lag1_sequence_diagnostics(
+        generated,
+        component,
+        background=background,
+        existing_audit=generator_audit,
+    )
+    scale = scale_normalised_diagnostics(
+        generated,
+        component,
+        background=background,
+        existing_audit=generator_audit,
+    )
+    variance = component_variance_diagnostics(
+        generated,
+        component,
+        background=background,
+    )
+    classification = classify_audit_diagnostics(lag1, scale, variance)
+
+    lag1_path = output_dir / "empirical_twin_v1_lag1_diagnostics.csv"
+    scale_path = output_dir / "empirical_twin_v1_scale_normalised_diagnostics.csv"
+    variance_path = output_dir / "empirical_twin_v1_component_variance_diagnostics.csv"
+    classification_path = output_dir / "empirical_twin_v1_audit_issue_classification.md"
+    lag1.to_csv(lag1_path, index=False)
+    scale.to_csv(scale_path, index=False)
+    variance.to_csv(variance_path, index=False)
+    classification_path.write_text(classification, encoding="utf-8")
+    return {
+        "lag1_diagnostics": lag1_path,
+        "scale_normalised_diagnostics": scale_path,
+        "component_variance_diagnostics": variance_path,
+        "issue_classification": classification_path,
+    }
+
+
+def lag1_sequence_diagnostics(
+    generated: pd.DataFrame,
+    component: pd.DataFrame,
+    *,
+    background: BackgroundSpec,
+    existing_audit: pd.DataFrame,
+) -> pd.DataFrame:
+    """Compare contract lag-1 targets with diagnostic pooled adjacent-pair estimates."""
+
+    rows: list[dict[str, Any]] = []
+    existing = existing_audit[existing_audit["parameter"] == "lag1_autocorrelation"].copy()
+    for keys, group in generated.groupby(
+        ["synthetic_world_id", "synthetic_replicate_index", "source_dataset", "task_id"],
+        dropna=False,
+        sort=True,
+    ):
+        world_id, replicate_index, source, task = keys
+        for feature in FEATURES:
+            target = _target_lookup(
+                background.acdc_temporal,
+                source=str(source),
+                task=str(task),
+                feature=feature,
+                column="lag1_mean_autocorrelation",
+                status_column="lag1_support_status",
+            )
+            sequence_lengths = []
+            pearson_values = []
+            pair_previous: list[float] = []
+            pair_current: list[float] = []
+            for _, sequence in group.groupby(
+                ["source_dataset", "participant_id", "session_id"],
+                dropna=False,
+                sort=True,
+            ):
+                series = sequence.sort_values("window_start_trial")[feature].dropna()
+                sequence_lengths.append(int(series.shape[0]))
+                if series.shape[0] >= 3 and series.var(ddof=0) > 0:
+                    previous = series.to_numpy(dtype=float)[:-1]
+                    current = series.to_numpy(dtype=float)[1:]
+                    if previous.std() > 0 and current.std() > 0:
+                        pearson_values.append(float(np.corrcoef(previous, current)[0, 1]))
+                    pair_previous.extend(previous.tolist())
+                    pair_current.extend(current.tolist())
+            pooled_observed = _safe_corr(pair_previous, pair_current)
+            component_rows = component[
+                (component["world_id"].astype(str) == str(world_id))
+                & (component["replicate_index"].astype(int) == int(replicate_index))
+                & (component["source_dataset"].astype(str) == str(source))
+                & (component["task_id"].astype(str) == str(task))
+                & (component["feature"].astype(str) == feature)
+            ]
+            pooled_ar = _component_adjacent_pair_corr(component_rows, "ar_component")
+            pooled_window_residual = _component_sum_adjacent_pair_corr(
+                component_rows,
+                ("ar_component", "fatigue_component"),
+            )
+            pooled_background = _component_adjacent_pair_corr(
+                component_rows,
+                "background_component",
+            )
+            existing_row = existing[
+                (existing["world_id"].astype(str) == str(world_id))
+                & (existing["replicate_index"].astype(int) == int(replicate_index))
+                & (existing["source_dataset"].astype(str) == str(source))
+                & (existing["task_id"].astype(str) == str(task))
+                & (existing["feature"].astype(str) == feature)
+            ]
+            existing_realised = (
+                _as_float(existing_row.iloc[0]["realised"])
+                if not existing_row.empty
+                else float("nan")
+            )
+            rows.append(
+                {
+                    "world_id": world_id,
+                    "replicate_index": int(replicate_index),
+                    "source_dataset": source,
+                    "task_id": task,
+                    "feature": feature,
+                    "target_contract_lag1": target,
+                    "n_sequences": len(sequence_lengths),
+                    "n_usable_sequences": len(pearson_values),
+                    "sequence_length_min": min(sequence_lengths) if sequence_lengths else 0,
+                    "sequence_length_p50": float(np.median(sequence_lengths))
+                    if sequence_lengths
+                    else float("nan"),
+                    "sequence_length_max": max(sequence_lengths) if sequence_lengths else 0,
+                    "existing_per_sequence_pearson_mean": existing_realised,
+                    "diagnostic_pooled_observed_adjacent_pair_corr": pooled_observed,
+                    "diagnostic_pooled_window_residual_adjacent_pair_corr": pooled_window_residual,
+                    "diagnostic_pooled_ar_component_adjacent_pair_corr": pooled_ar,
+                    "diagnostic_pooled_background_component_adjacent_pair_corr": pooled_background,
+                    "three_window_degeneracy": all(length == 3 for length in sequence_lengths),
+                    "diagnostic_note": (
+                        "per-sequence Pearson lag-1 is degenerate for three-window "
+                        "sequences; pooled adjacent-pair values are diagnostic only"
+                    ),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def scale_normalised_diagnostics(
+    generated: pd.DataFrame,
+    component: pd.DataFrame,
+    *,
+    background: BackgroundSpec,
+    existing_audit: pd.DataFrame,
+) -> pd.DataFrame:
+    """Add feature-scale-normalised mean and variance diagnostics."""
+
+    rows: list[dict[str, Any]] = []
+    for _, audit in existing_audit.iterrows():
+        parameter = str(audit["parameter"])
+        if parameter not in {
+            "source_task_mean",
+            "between_person_variance",
+            "session_within_person_variance",
+            "window_within_session_variance",
+        }:
+            continue
+        source = str(audit["source_dataset"])
+        task = str(audit["task_id"])
+        feature = str(audit["feature"])
+        target = _as_float(audit["target"])
+        realised = _as_float(audit["realised"])
+        template_sd = _template_feature_sd(background.template_summary, source, task, feature)
+        row = {
+            "world_id": audit["world_id"],
+            "replicate_index": int(audit["replicate_index"]),
+            "source_dataset": source,
+            "task_id": task,
+            "parameter": parameter,
+            "feature": feature,
+            "target": target,
+            "realised_combined_observed": realised,
+            "feature_sd_scale": template_sd,
+            "mean_delta_in_feature_sd": float("nan"),
+            "variance_ratio_combined_observed": _safe_fraction(realised, target),
+            "diagnostic_scope": "combined_observed_includes_known_structural_signal",
+        }
+        if parameter == "source_task_mean":
+            row["mean_delta_in_feature_sd"] = (
+                (realised - target) / template_sd
+                if np.isfinite(realised) and np.isfinite(target) and template_sd > 0
+                else float("nan")
+            )
+            row["variance_ratio_combined_observed"] = float("nan")
+            row["diagnostic_scope"] = "source_task_centred_shift"
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def component_variance_diagnostics(
+    generated: pd.DataFrame,
+    component: pd.DataFrame,
+    *,
+    background: BackgroundSpec,
+) -> pd.DataFrame:
+    """Compare nuisance targets with observed and component-isolated variances."""
+
+    rows: list[dict[str, Any]] = []
+    for keys, group in generated.groupby(
+        ["synthetic_world_id", "synthetic_replicate_index", "source_dataset", "task_id"],
+        dropna=False,
+        sort=True,
+    ):
+        world_id, replicate_index, source, task = keys
+        component_group = component[
+            (component["world_id"].astype(str) == str(world_id))
+            & (component["replicate_index"].astype(int) == int(replicate_index))
+            & (component["source_dataset"].astype(str) == str(source))
+            & (component["task_id"].astype(str) == str(task))
+        ]
+        for feature in FEATURES:
+            feature_component = component_group[component_group["feature"] == feature]
+            rows.extend(
+                [
+                    _component_variance_row(
+                        world_id,
+                        replicate_index,
+                        source,
+                        task,
+                        feature,
+                        "between_person_variance",
+                        _target_lookup(
+                            background.acdc_variance,
+                            source=str(source),
+                            task=str(task),
+                            feature=feature,
+                            column="between_participant_variance",
+                        ),
+                        _realised_between_variance(group, feature),
+                        _component_between_variance(feature_component, "background_component"),
+                        _component_between_variance(feature_component, "person_component"),
+                        "person_component_isolated_target_check",
+                    ),
+                    _component_variance_row(
+                        world_id,
+                        replicate_index,
+                        source,
+                        task,
+                        feature,
+                        "session_within_person_variance",
+                        _paired_target_variance(background.paired_variance, str(task), feature),
+                        _realised_session_variance(group, feature),
+                        _component_session_variance(feature_component, "background_component"),
+                        _component_session_variance(feature_component, "session_component"),
+                        "session_component_isolated_target_check",
+                    ),
+                    _component_variance_row(
+                        world_id,
+                        replicate_index,
+                        source,
+                        task,
+                        feature,
+                        "window_within_session_variance",
+                        _target_lookup(
+                            background.acdc_variance,
+                            source=str(source),
+                            task=str(task),
+                            feature=feature,
+                            column="window_within_session_variance",
+                        ),
+                        _realised_window_variance(group, feature),
+                        _component_window_variance(feature_component, "background_component"),
+                        _component_window_variance(feature_component, "ar_component"),
+                        "ar_component_innovation_target_check",
+                    ),
+                ]
+            )
+    return pd.DataFrame(rows)
+
+
+def classify_audit_diagnostics(
+    lag1: pd.DataFrame,
+    scale: pd.DataFrame,
+    variance: pd.DataFrame,
+) -> str:
+    """Return a concise diagnostic classification report."""
+
+    lag_valid = lag1.dropna(
+        subset=[
+            "target_contract_lag1",
+            "diagnostic_pooled_window_residual_adjacent_pair_corr",
+        ]
+    ).copy()
+    lag_valid["pooled_residual_abs_delta"] = (
+        lag_valid["diagnostic_pooled_window_residual_adjacent_pair_corr"]
+        - lag_valid["target_contract_lag1"]
+    ).abs()
+    lag_valid["per_sequence_abs_delta"] = (
+        lag_valid["existing_per_sequence_pearson_mean"]
+        - lag_valid["target_contract_lag1"]
+    ).abs()
+    residual_median_delta = (
+        float(lag_valid["pooled_residual_abs_delta"].median())
+        if not lag_valid.empty
+        else float("nan")
+    )
+    per_sequence_median_delta = (
+        float(lag_valid["per_sequence_abs_delta"].median())
+        if not lag_valid.empty
+        else float("nan")
+    )
+    three_window_rate = float(lag1["three_window_degeneracy"].mean()) if not lag1.empty else float("nan")
+    mean_rows = scale[scale["parameter"] == "source_task_mean"].copy()
+    median_abs_mean_z = (
+        float(mean_rows["mean_delta_in_feature_sd"].abs().median())
+        if not mean_rows.empty
+        else float("nan")
+    )
+    between_rows = variance[variance["parameter"] == "between_person_variance"].copy()
+    between_rows = between_rows.dropna(subset=["target", "component_isolated_realised"])
+    between_rows["component_ratio"] = between_rows["component_isolated_realised"] / between_rows["target"]
+    median_between_component_ratio = (
+        float(between_rows["component_ratio"].median()) if not between_rows.empty else float("nan")
+    )
+    session_rows = variance[variance["parameter"] == "session_within_person_variance"].copy()
+    session_rows = session_rows.dropna(subset=["target", "component_isolated_realised"])
+    session_rows["component_ratio"] = session_rows["component_isolated_realised"] / session_rows["target"]
+    median_session_component_ratio = (
+        float(session_rows["component_ratio"].median()) if not session_rows.empty else float("nan")
+    )
+    window_rows = variance[variance["parameter"] == "window_within_session_variance"].copy()
+    window_rows = window_rows.dropna(subset=["target", "component_isolated_realised"])
+    window_rows["component_ratio"] = window_rows["component_isolated_realised"] / window_rows["target"]
+    median_window_component_ratio = (
+        float(window_rows["component_ratio"].median()) if not window_rows.empty else float("nan")
+    )
+    classification = []
+    if three_window_rate >= 0.95 and per_sequence_median_delta > residual_median_delta:
+        classification.append(
+            "lag1_discrepancy: audit-estimator limitation (b); all generated sequences "
+            "are effectively length 3, making per-sequence Pearson lag-1 unstable/degenerate."
+        )
+    if np.isfinite(residual_median_delta) and residual_median_delta > 0.25:
+        classification.append(
+            "lag1_pooled_ar_component: possible generator AR-construction issue (a); "
+            "pooled window-residual lag-1 remains far from the contract target."
+        )
+    else:
+        classification.append(
+            "lag1_pooled_window_residual: no gross generator error detected at smoke scale; "
+            "remaining disagreement is compatible with estimator limitation and finite-smoke noise (b/c)."
+        )
+    classification.append(
+        "source_task_means: centred-shift diagnostic median absolute delta "
+        f"{median_abs_mean_z:.3f} feature SD; classify as finite-smoke noise (c) unless reviewed otherwise."
+    )
+    classification.append(
+        "nuisance_variance_audit: original combined-observed variance rows include known structural signal; "
+        "component-isolated rows should be used for generator-background diagnostics (b). "
+        f"Median between/session/window component target ratios: "
+        f"{median_between_component_ratio:.3f} / {median_session_component_ratio:.3f} / "
+        f"{median_window_component_ratio:.3f}."
+    )
+    if np.isfinite(median_session_component_ratio) and median_session_component_ratio < 0.75:
+        classification.append(
+            "session_variance_component: possible generator scaling issue (a); "
+            "the repeat-session deviation estimator is applied after participant-mean centring, "
+            "while the generator currently draws raw session effects at the target variance."
+        )
+    if np.isfinite(median_window_component_ratio) and median_window_component_ratio < 0.75:
+        classification.append(
+            "window_variance_component: possible generator/audit-estimator issue (a/b); "
+            "short three-window AR sequences and within-session centring reduce the component-isolated "
+            "realised variance relative to the target."
+        )
+    classification.append(
+        "empirical_contract_estimator: no genuine frozen empirical-contract estimator problem (d) "
+        "is established by this smoke diagnostic; do not change the contract before review."
+    )
+    return "\n".join(
+        [
+            "# M2.7 Empirical-Twin V1 Target-Realised Audit Diagnostics",
+            "",
+            "Scope: generator/audit diagnostics only. No tournament model-score outputs were read.",
+            "",
+            "## Lag-1 Summary",
+            "",
+            f"three_window_sequence_rate: {three_window_rate:.3f}",
+            f"median_abs_delta_existing_per_sequence_estimator: {per_sequence_median_delta:.3f}",
+            f"median_abs_delta_pooled_window_residual_estimator: {residual_median_delta:.3f}",
+            "",
+            "## Issue Classification",
+            "",
+            *[f"- {item}" for item in classification],
+            "",
+            "Stop for scientific review before changing the empirical-background contract or launching the pilot.",
+            "",
+        ]
+    )
+
+
 def write_empirical_twin_v1_outputs(
     runs: Sequence[EmpiricalTwinRun],
     *,
@@ -705,6 +1173,8 @@ def _apply_background_to_source(
     frame: pd.DataFrame,
     *,
     source_index: pd.Index,
+    world_id: str,
+    replicate_index: int,
     means: dict[str, float],
     between_cov: np.ndarray,
     session_cov: np.ndarray,
@@ -715,6 +1185,7 @@ def _apply_background_to_source(
     trial_counts: dict[str, float],
     structural_signal_fraction: float,
     rng: np.random.Generator,
+    component_rows: list[dict[str, Any]] | None = None,
 ) -> None:
     source_frame = frame.loc[source_index].copy()
     feature_matrix = source_frame.loc[:, list(FEATURES)].astype(float)
@@ -767,6 +1238,33 @@ def _apply_background_to_source(
                     + ar_state
                     + fatigue_vector
                 )
+                if component_rows is not None:
+                    for feature_index, feature in enumerate(FEATURES):
+                        component_rows.append(
+                            {
+                                "world_id": str(world_id),
+                                "replicate_index": int(replicate_index),
+                                "source_dataset": row["source_dataset"],
+                                "task_id": row["task_id"],
+                                "participant_id": row["participant_id"],
+                                "session_id": row["session_id"],
+                                "window_id": row["window_id"],
+                                "window_start_trial": row["window_start_trial"],
+                                "feature": feature,
+                                "target_mean": mean_vector[feature_index],
+                                "structural_component": structural[pos, feature_index],
+                                "person_component": person_effects[participant_key][feature_index],
+                                "session_component": session_effects[session_key][feature_index],
+                                "ar_component": ar_state[feature_index],
+                                "fatigue_component": fatigue_vector[feature_index],
+                                "background_component": (
+                                    person_effects[participant_key][feature_index]
+                                    + session_effects[session_key][feature_index]
+                                    + ar_state[feature_index]
+                                    + fatigue_vector[feature_index]
+                                ),
+                            }
+                        )
 
     for feature_index, feature in enumerate(FEATURES):
         frame.loc[source_frame.index, feature] = values[:, feature_index]
@@ -1044,6 +1542,121 @@ def _realised_lag1(frame: pd.DataFrame, feature: str) -> float:
     return float(np.nanmean(values)) if values else float("nan")
 
 
+def _component_adjacent_pair_corr(component_rows: pd.DataFrame, column: str) -> float:
+    previous_values: list[float] = []
+    current_values: list[float] = []
+    if component_rows.empty or column not in component_rows:
+        return float("nan")
+    for _, sequence in component_rows.groupby(
+        ["source_dataset", "participant_id", "session_id"],
+        dropna=False,
+        sort=True,
+    ):
+        ordered = sequence.sort_values("window_start_trial")
+        values = pd.to_numeric(ordered[column], errors="coerce").dropna().to_numpy(dtype=float)
+        if values.shape[0] >= 2:
+            previous_values.extend(values[:-1].tolist())
+            current_values.extend(values[1:].tolist())
+    return _safe_corr(previous_values, current_values)
+
+
+def _component_sum_adjacent_pair_corr(
+    component_rows: pd.DataFrame,
+    columns: Sequence[str],
+) -> float:
+    if component_rows.empty or any(column not in component_rows for column in columns):
+        return float("nan")
+    summed = component_rows.copy()
+    summed["__component_sum"] = summed.loc[:, list(columns)].sum(axis=1)
+    return _component_adjacent_pair_corr(summed, "__component_sum")
+
+
+def _safe_corr(previous: Sequence[float], current: Sequence[float]) -> float:
+    if len(previous) < 2 or len(current) < 2:
+        return float("nan")
+    previous_array = np.asarray(previous, dtype=float)
+    current_array = np.asarray(current, dtype=float)
+    valid = np.isfinite(previous_array) & np.isfinite(current_array)
+    previous_array = previous_array[valid]
+    current_array = current_array[valid]
+    if previous_array.shape[0] < 2 or previous_array.std() <= 0 or current_array.std() <= 0:
+        return float("nan")
+    return float(np.corrcoef(previous_array, current_array)[0, 1])
+
+
+def _template_feature_sd(
+    template_summary: pd.DataFrame,
+    source: str,
+    task: str,
+    feature: str,
+) -> float:
+    rows = template_summary[
+        (template_summary["source_dataset"].astype(str) == str(source))
+        & (template_summary["task_id"].astype(str) == str(task))
+    ]
+    if rows.empty:
+        return float("nan")
+    return _as_float(rows.iloc[0].get(f"{feature}_sd"))
+
+
+def _component_between_variance(component: pd.DataFrame, column: str) -> float:
+    if component.empty or column not in component:
+        return float("nan")
+    means = component.groupby(["source_dataset", "participant_id"], sort=True)[column].mean()
+    return _as_float(means.var(ddof=1))
+
+
+def _component_session_variance(component: pd.DataFrame, column: str) -> float:
+    if component.empty or column not in component:
+        return float("nan")
+    session = component.groupby(["source_dataset", "participant_id", "session_id"], sort=True)[
+        column
+    ].mean()
+    participant = session.groupby(level=[0, 1]).transform("mean")
+    return _as_float((session - participant).dropna().var(ddof=1))
+
+
+def _component_window_variance(component: pd.DataFrame, column: str) -> float:
+    if component.empty or column not in component:
+        return float("nan")
+    session_mean = component.groupby(["source_dataset", "participant_id", "session_id"], sort=True)[
+        column
+    ].transform("mean")
+    residual = (component[column] - session_mean).dropna()
+    return _as_float(residual.var(ddof=1))
+
+
+def _component_variance_row(
+    world_id: str,
+    replicate_index: int,
+    source: object,
+    task: object,
+    feature: str,
+    parameter: str,
+    target: float,
+    combined_observed: float,
+    background_realised: float,
+    component_isolated: float,
+    diagnostic_scope: str,
+) -> dict[str, Any]:
+    return {
+        "world_id": str(world_id),
+        "replicate_index": int(replicate_index),
+        "source_dataset": source,
+        "task_id": task,
+        "feature": feature,
+        "parameter": parameter,
+        "target": target,
+        "combined_observed_realised": combined_observed,
+        "background_component_realised": background_realised,
+        "component_isolated_realised": component_isolated,
+        "combined_observed_ratio": _safe_fraction(combined_observed, target),
+        "background_component_ratio": _safe_fraction(background_realised, target),
+        "component_isolated_ratio": _safe_fraction(component_isolated, target),
+        "diagnostic_scope": diagnostic_scope,
+    }
+
+
 def _participant_scores(test: pd.DataFrame, scores: pd.Series) -> pd.Series:
     table = test.loc[:, ["source_dataset", "participant_id"]].copy()
     table["heldout_log_density"] = scores.reindex(test.index).to_numpy(dtype=float)
@@ -1116,6 +1729,12 @@ def _as_float(value: object, *, default: float = float("nan")) -> float:
     return result if np.isfinite(result) else default
 
 
+def _safe_fraction(numerator: float, denominator: float) -> float:
+    if not np.isfinite(numerator) or not np.isfinite(denominator) or denominator == 0:
+        return float("nan")
+    return float(numerator / denominator)
+
+
 def _run_id(*parts: object) -> str:
     return hashlib.sha256("|".join(str(part) for part in parts).encode("utf-8")).hexdigest()[:16]
 
@@ -1171,7 +1790,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--config", default=str(DEFAULT_CONFIG_PATH))
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--no-tournament-smoke", action="store_true")
+    parser.add_argument(
+        "--audit-diagnostics-only",
+        action="store_true",
+        help="Write generator target-realised diagnostics without running tournament scoring.",
+    )
     args = parser.parse_args(argv)
+    if args.audit_diagnostics_only:
+        result = run_empirical_twin_v1_audit_diagnostics(
+            config_path=args.config,
+            output_dir=args.output_dir,
+        )
+        print(json.dumps({key: value for key, value in result.items() if key != "paths"}, indent=2))
+        for name, path in result["paths"].items():
+            print(f"{name}: {path}")
+        return 0
     result = run_empirical_twin_v1_smoke(
         config_path=args.config,
         output_dir=args.output_dir,
