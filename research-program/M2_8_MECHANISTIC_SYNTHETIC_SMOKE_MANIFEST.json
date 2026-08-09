@@ -1,0 +1,31 @@
+{
+  "config_hash": "sha256:f3f482c4c4ccaf83b5dccb6947844475930f518c3339d3e84f0c87ad13346c45",
+  "config_path": "config/mechanistic_identifiability_v1.yaml",
+  "formal_claims_allowed": false,
+  "literal_cusp_status": "later_registered_competitor_only",
+  "n_gates": 6,
+  "n_units": 24,
+  "output_hashes": {
+    "schedule_csv": "sha256:95832283bed3c899ea743a9657ad567613662b5cf918fc13339fa89da9705808",
+    "schedule_json": "sha256:df60843ca12b96185c28717bb654bf2ef4cc13f20910b9e30e9b065fd20be9e3"
+  },
+  "protocol_path": "research-program/M2_8_MECHANISTIC_SYNTHETIC_IDENTIFIABILITY_PROTOCOL.md",
+  "real_transfer_outcomes_allowed": false,
+  "real_wrapper_transfer_outcomes_inspected": false,
+  "schedule_hash": "sha256:95832283bed3c899ea743a9657ad567613662b5cf918fc13339fa89da9705808",
+  "status": "pre_outcome_smoke_design",
+  "study_id": "mechanistic_identifiability_v1",
+  "transfer_external_use": "synthetic_heldout_diagnostic_only",
+  "truth_family_ids": [
+    "MECH0",
+    "MECH1",
+    "MECH2",
+    "MECH3",
+    "MECH4",
+    "MECH5",
+    "MECH6",
+    "MECH7"
+  ],
+  "variable_registry_commit": "4073c76357954a386b30d2cad792e4c6bb4eb393",
+  "variable_registry_path": "config/hrp_stack_variable_registry_v2.yaml"
+}

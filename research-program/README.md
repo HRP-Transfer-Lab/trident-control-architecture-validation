@@ -66,11 +66,15 @@ retuning of M2.7 is authorised.
 
 ### `M2_8_MECHANISTIC_SYNTHETIC_IDENTIFIABILITY_PROTOCOL.md`
 
-Drafts the next known-truth synthetic milestone. M2.8 shifts the question from
+Defines the next known-truth synthetic milestone. M2.8 shifts the question from
 "which static latent model wins?" to whether mechanistic variables such as
 capacity, vigilance, APC parameters, predictive calibration and temporary
 dynamic regime can be recovered and distinguished from simpler alternatives
 before any real wrapper-transfer outcomes are inspected.
+
+Its first machine-readable pre-outcome scaffold is
+`config/mechanistic_identifiability_v1.yaml`, validated by
+`trident_validation.mechanistic.identifiability_plan`.
 
 ### `M3_VARIABLE_ARCHITECTURE_V2.md`
 

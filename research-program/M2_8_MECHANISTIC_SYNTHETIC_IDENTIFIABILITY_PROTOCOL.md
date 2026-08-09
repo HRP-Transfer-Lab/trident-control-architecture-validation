@@ -1,12 +1,32 @@
 # M2.8 Mechanistic Synthetic Identifiability Protocol
 
-**Status:** prospective protocol draft for scientific review
+**Status:** prospective pre-outcome protocol for mechanistic synthetic design
 
 M2.8 is a known-truth synthetic milestone. It is not a real-data test of
 Trident-G and it does not use Attention Coach wrapper-transfer outcomes.
 
 No confirmatory Trident-G, APC, PACE, neural-criticality or cusp claim is
 authorised by this protocol.
+
+## Machine-Readable Design
+
+The first pre-outcome M2.8 design scaffold is:
+
+```text
+config/mechanistic_identifiability_v1.yaml
+```
+
+It consumes the frozen M3 variable registry:
+
+```text
+config/hrp_stack_variable_registry_v2.yaml
+4073c76357954a386b30d2cad792e4c6bb4eb393
+```
+
+The scaffold is schedule-only. It registers the known-truth family contrasts,
+sample geometry and independent seed streams for a later generator smoke, but
+does not authorise model fitting, pilot execution or real wrapper-transfer
+outcome inspection.
 
 ## Relation To M2.7
 
@@ -284,6 +304,20 @@ whether transfer criteria were held out from latent fitting.
 
 No M2.8 pilot or confirmatory run is authorised by this draft alone.
 
+The current `mechanistic_identifiability_v1` scaffold authorises only
+pre-outcome validation of:
+
+```text
+variable registry consistency;
+gate-to-family mapping;
+participant-isolated split requirement;
+truth-column stripping requirement;
+deterministic gate x truth-family x replicate schedule;
+independent structural, nuisance, observation, split and model seeds;
+real transfer outcomes remaining uninspected;
+literal cusp/bifurcation remaining a later registered competitor only.
+```
+
 ## Downstream Empirical Roadmap
 
 If M2.8 supports mechanistic identifiability, the next empirical programme is:
@@ -299,4 +333,3 @@ niche and delayed-transfer testing.
 
 The first major empirical Trident-G test should be the prospective held-out
 wrapper experiment, not another static profile tournament.
-

@@ -1,0 +1,158 @@
+registry:
+  id: mechanistic_identifiability_v1
+  milestone: M2_8_mechanistic_synthetic_identifiability
+  status: pre_outcome_smoke_design
+  protocol_path: research-program/M2_8_MECHANISTIC_SYNTHETIC_IDENTIFIABILITY_PROTOCOL.md
+  variable_registry_path: config/hrp_stack_variable_registry_v2.yaml
+  variable_registry_commit: 4073c76357954a386b30d2cad792e4c6bb4eb393
+  formal_claims_allowed: false
+  real_transfer_outcomes_allowed: false
+  trident_validation_claim_allowed: false
+  neural_criticality_claim_allowed: false
+  cusp_required: false
+
+primary_design:
+  purpose: known_truth_mechanistic_identifiability_scaffold
+  run_status: schedule_only_no_model_fitting
+  participant_isolated_split_required: true
+  truth_columns_stripped_before_scoring_required: true
+  transfer_external_use: synthetic_heldout_diagnostic_only
+  real_wrapper_transfer_outcomes_inspected: false
+  pace_status: descriptive_until_independently_supported
+  literal_cusp_status: later_registered_competitor_only
+  primary_causal_family_ids:
+    - MECH0
+    - MECH1
+    - MECH2
+    - MECH3
+    - MECH4
+    - MECH5
+    - MECH6
+    - MECH7
+
+smoke_design:
+  replicates_per_truth_family_per_gate: 2
+  participants_per_replicate: 48
+  sessions_per_participant: 2
+  blocks_per_session: 16
+  participant_holdout_fraction: 0.25
+  master_seed: 20260819
+  seed_streams:
+    - structural
+    - nuisance
+    - observation
+    - split
+    - model
+
+candidate_scoring_families:
+  - id: SCORE0_capacity_only
+    status: placeholder_not_implemented
+    tests_against:
+      - MECH0
+      - MECH1
+  - id: SCORE1_static_continuous_apc
+    status: placeholder_not_implemented
+    tests_against:
+      - MECH1
+      - MECH2
+      - MECH5
+  - id: SCORE2_vigilance_gated_apc
+    status: placeholder_not_implemented
+    tests_against:
+      - MECH2
+  - id: SCORE3_profile_layer
+    status: placeholder_not_implemented
+    tests_against:
+      - MECH3
+      - MECH4
+  - id: SCORE4_autoregressive_continuous_dynamics
+    status: placeholder_not_implemented
+    tests_against:
+      - MECH5
+      - MECH6
+  - id: SCORE5_generic_hmm_hsmm
+    status: placeholder_not_implemented
+    tests_against:
+      - MECH5
+      - MECH6
+  - id: SCORE6_adaptive_corridor
+    status: placeholder_not_implemented
+    tests_against:
+      - MECH6
+      - MECH7
+  - id: SCORE7_lock_excess_update_failure_modes
+    status: placeholder_not_implemented
+    tests_against:
+      - MECH7
+
+identifiability_gates:
+  - id: K_only_vs_APC
+    truth_families:
+      - MECH0
+      - MECH1
+    primary_variables:
+      - K
+      - C_signal
+      - A_evidence
+      - T_commit
+      - PC_calibration
+    decision_status: pre_outcome
+  - id: APC_vs_vigilance_gated_APC
+    truth_families:
+      - MECH1
+      - MECH2
+    primary_variables:
+      - V
+      - C_signal
+      - A_evidence
+      - T_commit
+      - PC_calibration
+    decision_status: pre_outcome
+  - id: profile_vs_continuous_region
+    truth_families:
+      - MECH3
+      - MECH4
+    primary_variables:
+      - P_pace
+      - C_signal
+      - A_evidence
+      - T_commit
+      - PC_calibration
+    decision_status: pre_outcome
+  - id: static_vs_dynamic
+    truth_families:
+      - MECH1
+      - MECH5
+    primary_variables:
+      - R_dynamic
+      - C_signal
+      - A_evidence
+      - T_commit
+      - PC_calibration
+    decision_status: pre_outcome
+  - id: generic_vs_adaptive_corridor
+    truth_families:
+      - MECH5
+      - MECH6
+    primary_variables:
+      - R_dynamic
+      - V
+      - C_signal
+      - A_evidence
+      - PC_calibration
+    decision_status: pre_outcome
+  - id: adaptive_vs_failure_modes
+    truth_families:
+      - MECH6
+      - MECH7
+    primary_variables:
+      - R_dynamic
+      - V
+      - A_evidence
+      - PC_calibration
+    decision_status: pre_outcome
+
+outputs:
+  schedule_csv: research-program/M2_8_MECHANISTIC_SYNTHETIC_SMOKE_SCHEDULE.csv
+  schedule_json: research-program/M2_8_MECHANISTIC_SYNTHETIC_SMOKE_SCHEDULE.json
+  manifest_json: research-program/M2_8_MECHANISTIC_SYNTHETIC_SMOKE_MANIFEST.json
