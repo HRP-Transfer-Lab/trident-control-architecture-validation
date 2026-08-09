@@ -1,6 +1,6 @@
 # Static Model-Selection Contract V2
 
-**Status:** Draft contract for M2.7 preflight  
+**Status:** frozen static model-selection contract for M2.7  
 **Predecessor:** M2.6/M2.6b static tournament V1, frozen  
 **Reason for V2:** `M2_closed_form_v1` failed exact nonlinear-vigilance recovery; `M2_EM_v1` repaired the estimator failure in M2.6c diagnostics.
 
