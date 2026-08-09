@@ -1,6 +1,6 @@
 """M2.7 empirical-twin V1 generator smoke.
 
-The generator preserves known W0-W4 structural truth and adds frozen empirical
+The generator preserves known ETW0-ETW4 structural truth and adds frozen empirical
 background nuisance structure. It is a smoke/pipeline validation tool, not a
 scientific recovery estimator.
 """
@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import lru_cache
 import hashlib
 import json
 from pathlib import Path
@@ -42,15 +43,15 @@ from trident_validation.synthetic.selection_v2 import select_preferred_model_v2
 EMPIRICAL_TWIN_V1_ID = "empirical_twin_v1"
 EMPIRICAL_BACKGROUND_CONTRACT_ID = "EMPIRICAL_BACKGROUND_CONTRACT_V1"
 EMPIRICAL_BACKGROUND_CONTRACT_SHA = "1e9c11e030dc0706c8941dfc08489bb6f63cac5d"
-STATIC_MODEL_SELECTION_CONTRACT_V2_SHA = "81d22f2"
+STATIC_MODEL_SELECTION_CONTRACT_V2_SHA = "81d22f2a942afd1652c169935f058b1634922d30"
 DEFAULT_CONFIG_PATH = Path("config/empirical_twin_v1.yaml")
 DEFAULT_OUTPUT_DIR = Path("reports/generated/empirical_twin_v1_smoke")
 FEATURES = tuple(CORE_SYNTHETIC_FEATURES)
 SOURCE_TASK_SHIFT_RULE = "template_mean_minus_full_acdc_feature_mean"
 TRIAL_COUNT_IMPLEMENTATION_STATUS = "truncated_normal_from_mean_sd_p10_p90_approximation"
 SESSION_CALIBRATION_RULE = "raw_session_covariance_scaled_by_m_over_m_minus_1_before_participant_centring"
-WINDOW_CALIBRATION_RULE = "diagonal_ar_innovation_scaled_to_centred_window_variance_after_fatigue"
-LAG1_CALIBRATION_RULE = "internal_ar_parameter_recorded_separately_from_frozen_short_sequence_estimand"
+WINDOW_CALIBRATION_RULE = "full_ar_innovation_covariance_scaled_to_centred_window_covariance_after_fatigue_or_diagonal_fallback"
+LAG1_CALIBRATION_RULE = "deterministic_grid_calibration_of_internal_phi_to_frozen_short_sequence_pearson_estimand"
 M2_7_EMPIRICAL_TWIN_REGISTRY_VERSION = "m2_7_empirical_twin_world_registry_v1"
 
 EmpiricalTwinWorldId = Literal["ETW0", "ETW1", "ETW2", "ETW3", "ETW4"]
@@ -488,11 +489,19 @@ def generate_empirical_twin_dataset(
             default=0.0,
             quantity="missingness_rate",
         )
-        window_cov = _calibrate_window_covariance_for_estimand(
+        internal_phi = _calibrate_internal_phi_map(
+            lag1,
+            fatigue=fatigue,
+            target_window_cov=window_cov,
+            windows_per_session=int(config["windows_per_session"]),
+        )
+        window_cov, window_calibration_support = _calibrate_window_covariance_for_estimand(
             window_cov,
-            lag1=lag1,
+            internal_phi=internal_phi,
             fatigue=fatigue,
             windows_per_session=int(config["windows_per_session"]),
+            source=str(source),
+            task=task,
         )
         trial_counts = _trial_count_targets(template)
 
@@ -503,6 +512,7 @@ def generate_empirical_twin_dataset(
             + _stamp_support_rows(lag1_support, world_id, replicate_index)
             + _stamp_support_rows(fatigue_support, world_id, replicate_index)
             + _stamp_support_rows(missing_support, world_id, replicate_index)
+            + _stamp_support_rows(window_calibration_support, world_id, replicate_index)
         )
         support_rows.append(
             _support_row(
@@ -525,7 +535,8 @@ def generate_empirical_twin_dataset(
             between_cov=between_cov,
             session_cov=session_cov,
             window_cov=window_cov,
-            lag1=lag1,
+            internal_phi=internal_phi,
+            frozen_lag1_target=lag1,
             fatigue=fatigue if session_trend is False else fatigue,
             missingness=missingness,
             trial_counts=trial_counts,
@@ -792,6 +803,18 @@ def build_generator_audit(
                         column="lag1_mean_autocorrelation",
                     ),
                     _realised_lag1(frame, feature),
+                )
+            )
+            rows.append(
+                _audit_row(
+                    world_id,
+                    replicate_index,
+                    source,
+                    task,
+                    "repeated_person_stability",
+                    feature,
+                    _paired_target_stability(background.paired_stability, task, feature),
+                    _realised_repeated_person_stability(frame, feature),
                 )
             )
         rows.append(
@@ -1422,7 +1445,8 @@ def _apply_background_to_source(
     between_cov: np.ndarray,
     session_cov: np.ndarray,
     window_cov: np.ndarray,
-    lag1: dict[str, float],
+    internal_phi: dict[str, float],
+    frozen_lag1_target: dict[str, float],
     fatigue: dict[str, float],
     missingness: dict[str, float],
     trial_counts: dict[str, float],
@@ -1442,7 +1466,7 @@ def _apply_background_to_source(
     values = np.zeros((source_frame.shape[0], len(FEATURES)), dtype=float)
     source_positions = {index: pos for pos, index in enumerate(source_frame.index)}
     rho = np.array(
-        [np.clip(lag1.get(feature, 0.0), -0.8, 0.8) for feature in FEATURES],
+        [np.clip(internal_phi.get(feature, 0.0), -0.95, 0.95) for feature in FEATURES],
         dtype=float,
     )
 
@@ -1494,6 +1518,8 @@ def _apply_background_to_source(
                                 "window_start_trial": row["window_start_trial"],
                                 "feature": feature,
                                 "target_source_task_shift": shift_vector[feature_index],
+                                "frozen_lag1_target": frozen_lag1_target.get(feature, np.nan),
+                                "internal_ar_phi": rho[feature_index],
                                 "structural_component": structural[pos, feature_index],
                                 "person_component": person_effects[participant_key][feature_index],
                                 "session_component": session_effects[session_key][feature_index],
@@ -1593,11 +1619,17 @@ def _centred_source_task_shifts(
     template: pd.Series,
 ) -> dict[str, float]:
     global_means = _feature_global_means(background)
-    return {
-        feature: _as_float(template.get(f"{feature}_mean"), default=global_means[feature])
-        - global_means[feature]
-        for feature in FEATURES
-    }
+    shifts: dict[str, float] = {}
+    for feature in FEATURES:
+        status, _reason = _acdc_template_feature_eligible(template, feature)
+        if status != "estimated":
+            shifts[feature] = 0.0
+        else:
+            shifts[feature] = (
+                _as_float(template.get(f"{feature}_mean"), default=global_means[feature])
+                - global_means[feature]
+            )
+    return shifts
 
 
 def _template_support_rows(
@@ -1687,7 +1719,7 @@ def _acdc_covariance_matrix(
     for _, row in rows.iterrows():
         feature_a = str(row["feature_a"])
         feature_b = str(row["feature_b"])
-        status, reason = _acdc_covariance_row_eligible(row, level=level)
+        status, reason = _acdc_covariance_row_eligible(row, background=background, level=level)
         if status == "estimated":
             eligible_rows.append(row)
         support_rows.append(
@@ -1843,7 +1875,11 @@ def _paired_session_covariance(
     for _, row in rows.iterrows():
         feature_a = str(row["feature_a"])
         feature_b = str(row["feature_b"])
-        status, reason = _paired_covariance_row_eligible(row, features=features)
+        status, reason = _paired_covariance_row_eligible(
+            row,
+            features=features,
+            paired_variance=background.paired_variance,
+        )
         if status == "estimated":
             eligible_rows.append(row)
         support_rows.append(
@@ -1889,7 +1925,23 @@ def _paired_session_covariance(
     return matrix, mode, support_rows
 
 
-def _acdc_covariance_row_eligible(row: pd.Series, *, level: str) -> tuple[str, str]:
+def _acdc_covariance_row_eligible(
+    row: pd.Series,
+    *,
+    background: BackgroundSpec,
+    level: str,
+) -> tuple[str, str]:
+    template_rows = background.template_summary[
+        (background.template_summary["source_dataset"].astype(str) == str(row.get("source_dataset")))
+        & (background.template_summary["task_id"].astype(str) == str(row.get("task_id")))
+    ]
+    if template_rows.empty:
+        return "unsupported", "template_missing_for_covariance_row"
+    template = template_rows.iloc[0]
+    for feature in (str(row.get("feature_a")), str(row.get("feature_b"))):
+        status, reason = _acdc_template_feature_eligible(template, feature)
+        if status != "estimated":
+            return "unsupported", f"{feature}:{reason}"
     if str(row.get("support_status")) != "estimated":
         return "unsupported", str(row.get("support_reason", "extractor_not_estimated"))
     n_units = _as_float(row.get("n_units"), default=0.0)
@@ -1904,11 +1956,23 @@ def _paired_covariance_row_eligible(
     row: pd.Series,
     *,
     features: Sequence[str],
+    paired_variance: pd.DataFrame,
 ) -> tuple[str, str]:
     feature_a = str(row.get("feature_a"))
     feature_b = str(row.get("feature_b"))
     if feature_a not in features or feature_b not in features:
         return "unsupported", "paired_feature_not_exact_canonical_feature"
+    task = str(row.get("task_id"))
+    for feature in (feature_a, feature_b):
+        variance_rows = paired_variance[
+            (paired_variance["task_id"].astype(str) == task)
+            & (paired_variance["feature"].astype(str) == feature)
+            & (paired_variance["session_support_status"].astype(str) == "estimated")
+        ]
+        if variance_rows.empty:
+            return "unsupported", f"{feature}:paired_exact_feature_variance_missing"
+        if _as_float(variance_rows.iloc[0].get("n_repeat_participants"), default=0.0) < 30:
+            return "unsupported", f"{feature}:repeat_participants_below_30"
     if str(row.get("support_status")) != "estimated":
         return "unsupported", str(row.get("support_reason", "extractor_not_estimated"))
     if _as_float(row.get("n_units"), default=0.0) < 30:
@@ -1930,36 +1994,196 @@ def _calibrate_session_covariance_for_centring(
     return scaled
 
 
+def _calibrate_internal_phi_map(
+    frozen_lag1: dict[str, float],
+    *,
+    fatigue: dict[str, float],
+    target_window_cov: np.ndarray,
+    windows_per_session: int,
+) -> dict[str, float]:
+    return {
+        feature: _calibrate_internal_phi_for_frozen_lag1(
+            _as_float(frozen_lag1.get(feature), default=0.0),
+            fatigue_slope=_as_float(fatigue.get(feature), default=0.0),
+            target_window_variance=max(float(target_window_cov[index, index]), 0.0),
+            windows_per_session=windows_per_session,
+        )
+        for index, feature in enumerate(FEATURES)
+    }
+
+
+@lru_cache(maxsize=2048)
+def _calibrate_internal_phi_for_frozen_lag1(
+    target_lag1: float,
+    *,
+    fatigue_slope: float,
+    target_window_variance: float,
+    windows_per_session: int,
+) -> float:
+    if not np.isfinite(target_lag1) or windows_per_session < 3 or target_window_variance <= 0:
+        return 0.0
+    target = float(np.clip(target_lag1, -0.95, 0.95))
+    grid = np.linspace(-0.95, 0.95, 101)
+    estimates = np.array(
+        [
+            _expected_frozen_lag1_for_phi(
+                float(phi),
+                fatigue_slope=fatigue_slope,
+                target_window_variance=target_window_variance,
+                windows_per_session=windows_per_session,
+            )
+            for phi in grid
+        ],
+        dtype=float,
+    )
+    valid = np.isfinite(estimates)
+    if not valid.any():
+        return float(np.clip(target, -0.8, 0.8))
+    best_index = int(np.nanargmin(np.abs(estimates[valid] - target)))
+    valid_grid = grid[valid]
+    return float(valid_grid[best_index])
+
+
+def _expected_frozen_lag1_for_phi(
+    phi: float,
+    *,
+    fatigue_slope: float,
+    target_window_variance: float,
+    windows_per_session: int,
+) -> float:
+    q = _calibrated_window_innovation_variance(
+        target_window_variance,
+        phi=phi,
+        fatigue_slope=fatigue_slope,
+        windows_per_session=windows_per_session,
+    )
+    if q <= 0:
+        return float("nan")
+    normals = _lag1_calibration_normals(windows_per_session)
+    states = np.zeros_like(normals)
+    state = np.zeros(normals.shape[0], dtype=float)
+    innovation_sd = float(np.sqrt(q))
+    for window in range(windows_per_session):
+        state = phi * state + normals[:, window] * innovation_sd
+        states[:, window] = state + fatigue_slope * window
+    return _frozen_lag1_estimator_from_array(states)
+
+
+@lru_cache(maxsize=16)
+def _lag1_calibration_normals(windows_per_session: int) -> np.ndarray:
+    rng = np.random.default_rng(_child_seed("lag1_calibration_normals", windows_per_session))
+    return rng.normal(size=(2048, windows_per_session))
+
+
+def _frozen_lag1_estimator_from_array(values: np.ndarray) -> float:
+    if values.shape[1] < 3:
+        return float("nan")
+    previous = values[:, :-1]
+    current = values[:, 1:]
+    previous_centered = previous - previous.mean(axis=1, keepdims=True)
+    current_centered = current - current.mean(axis=1, keepdims=True)
+    numerator = np.sum(previous_centered * current_centered, axis=1)
+    denominator = np.sqrt(
+        np.sum(previous_centered**2, axis=1) * np.sum(current_centered**2, axis=1)
+    )
+    valid = denominator > 0
+    if not valid.any():
+        return float("nan")
+    return float(np.mean(numerator[valid] / denominator[valid]))
+
+
+def _calibrated_window_innovation_variance(
+    target_variance: float,
+    *,
+    phi: float,
+    fatigue_slope: float,
+    windows_per_session: int,
+) -> float:
+    times = np.arange(windows_per_session, dtype=float)
+    fatigue_sample_variance_factor = float(
+        np.sum((times - times.mean()) ** 2) / max(windows_per_session - 1, 1)
+    )
+    fatigue_variance = fatigue_slope * fatigue_slope * fatigue_sample_variance_factor
+    residual_target = max(float(target_variance) - fatigue_variance, 0.0)
+    factor = _centred_ar_sample_covariance_factor(phi, phi, windows_per_session)
+    return residual_target / max(factor, 1e-12)
+
+
 def _calibrate_window_covariance_for_estimand(
     target_cov: np.ndarray,
     *,
-    lag1: dict[str, float],
+    internal_phi: dict[str, float],
     fatigue: dict[str, float],
     windows_per_session: int,
-) -> np.ndarray:
+    source: str = "",
+    task: str = "",
+) -> tuple[np.ndarray, list[dict[str, Any]]]:
     if windows_per_session < 2 or np.allclose(target_cov, 0.0):
-        return target_cov
-    calibrated = np.zeros_like(target_cov, dtype=float)
+        return target_cov, []
+    phi = np.array(
+        [np.clip(internal_phi.get(feature, 0.0), -0.95, 0.95) for feature in FEATURES],
+        dtype=float,
+    )
+    slopes = np.array([fatigue.get(feature, 0.0) for feature in FEATURES], dtype=float)
     times = np.arange(windows_per_session, dtype=float)
-    fatigue_sample_variance_factor = float(np.sum((times - times.mean()) ** 2) / (windows_per_session - 1))
+    fatigue_sample_cov_factor = float(
+        np.sum((times - times.mean()) ** 2) / max(windows_per_session - 1, 1)
+    )
+    q = np.zeros_like(target_cov, dtype=float)
+    for i, feature_i in enumerate(FEATURES):
+        for j, feature_j in enumerate(FEATURES):
+            factor = _centred_ar_sample_covariance_factor(phi[i], phi[j], windows_per_session)
+            fatigue_cov = slopes[i] * slopes[j] * fatigue_sample_cov_factor
+            q[i, j] = (target_cov[i, j] - fatigue_cov) / max(factor, 1e-12)
+    q = (q + q.T) / 2
+    min_eigen = float(np.linalg.eigvalsh(q).min()) if q.size else 0.0
+    rows: list[dict[str, Any]] = []
+    if min_eigen >= -1e-8:
+        rows.append(
+            _support_row(
+                "",
+                0,
+                "window_innovation_covariance_calibration",
+                "support_eligible_covariance",
+                "full_pairwise_ar_covariance_inversion_psd",
+                source_dataset=source,
+                task_id=task,
+            )
+        )
+        return q + np.eye(q.shape[0]) * 1e-12, rows
+    diagonal = np.zeros_like(target_cov, dtype=float)
     for index, feature in enumerate(FEATURES):
-        target_variance = max(float(target_cov[index, index]), 0.0)
-        slope = float(fatigue.get(feature, 0.0))
-        fatigue_variance = slope * slope * fatigue_sample_variance_factor
-        residual_target = max(target_variance - fatigue_variance, 0.0)
-        phi = float(np.clip(lag1.get(feature, 0.0), -0.8, 0.8))
-        factor = _centred_ar_sample_variance_factor(phi, windows_per_session)
-        calibrated[index, index] = residual_target / max(factor, 1e-12)
-    return calibrated
+        diagonal[index, index] = _calibrated_window_innovation_variance(
+            max(float(target_cov[index, index]), 0.0),
+            phi=float(phi[index]),
+            fatigue_slope=float(slopes[index]),
+            windows_per_session=windows_per_session,
+        )
+    rows.append(
+        _support_row(
+            "",
+            0,
+            "window_innovation_covariance_calibration",
+            "diagonal_fallback_non_psd",
+            f"full_pairwise_ar_covariance_inversion_non_psd_min_eigen={min_eigen:.6g}",
+            source_dataset=source,
+            task_id=task,
+            fallback_type="calibrated_supported_diagonal_variances",
+            fallback_source="same_template_window_variance",
+        )
+    )
+    return diagonal, rows
 
 
-def _centred_ar_sample_variance_factor(phi: float, length: int) -> float:
-    transition = np.zeros((length, length), dtype=float)
+def _centred_ar_sample_covariance_factor(phi_i: float, phi_j: float, length: int) -> float:
+    transition_i = np.zeros((length, length), dtype=float)
+    transition_j = np.zeros((length, length), dtype=float)
     for row in range(length):
         for col in range(row + 1):
-            transition[row, col] = phi ** (row - col)
+            transition_i[row, col] = phi_i ** (row - col)
+            transition_j[row, col] = phi_j ** (row - col)
     centring = np.eye(length) - np.ones((length, length), dtype=float) / float(length)
-    covariance = centring @ transition @ transition.T @ centring.T
+    covariance = centring @ transition_i @ transition_j.T @ centring.T
     return float(np.trace(covariance) / max(length - 1, 1))
 
 
@@ -2145,6 +2369,21 @@ def _paired_target_variance(frame: pd.DataFrame, task: str, feature: str) -> flo
     return max(_as_float(rows.iloc[0]["session_within_participant_variance"], default=0.0), 0.0)
 
 
+def _paired_target_stability(frame: pd.DataFrame, task: str, feature: str) -> float:
+    if frame.empty:
+        return float("nan")
+    rows = frame[
+        (frame["task_id"].astype(str) == str(task))
+        & (frame["feature"].astype(str) == str(feature))
+        & (frame["contract_support_status"].astype(str) == "estimated")
+    ]
+    if rows.empty:
+        return float("nan")
+    if _as_float(rows.iloc[0].get("n_repeat_participants"), default=0.0) < 30:
+        return float("nan")
+    return _as_float(rows.iloc[0].get("repeat_person_stability_icc"))
+
+
 def _finalise_generated_bounds(frame: pd.DataFrame) -> pd.DataFrame:
     bounded = frame.copy()
     bounded["accuracy"] = bounded["accuracy"].clip(0.01, 0.999)
@@ -2209,6 +2448,32 @@ def _realised_lag1(frame: pd.DataFrame, feature: str) -> float:
             if previous.std() > 0 and current.std() > 0:
                 values.append(float(np.corrcoef(previous, current)[0, 1]))
     return float(np.nanmean(values)) if values else float("nan")
+
+
+def _realised_repeated_person_stability(frame: pd.DataFrame, feature: str) -> float:
+    observed = frame.loc[:, ["participant_id", "session_id"]].copy()
+    observed["_value"] = pd.to_numeric(frame[feature], errors="coerce")
+    observed = observed.dropna(subset=["_value"])
+    session_counts = observed.groupby("participant_id", sort=True)["session_id"].nunique()
+    repeat_ids = session_counts[session_counts >= 2].index
+    repeated = observed[observed["participant_id"].isin(repeat_ids)]
+    if repeated.empty:
+        return float("nan")
+    participant_means = repeated.groupby("participant_id", sort=True)["_value"].mean()
+    baselines = repeated.join(participant_means.rename("participant_mean"), on="participant_id")
+    residuals = baselines["_value"] - baselines["participant_mean"]
+    between = (
+        float(participant_means.var(ddof=1))
+        if participant_means.shape[0] > 1
+        else float("nan")
+    )
+    session = (
+        float(residuals.var(ddof=1))
+        if residuals.dropna().shape[0] > 1
+        else float("nan")
+    )
+    denominator = np.nansum([between, session])
+    return _safe_fraction(between, denominator)
 
 
 def _component_adjacent_pair_corr(component_rows: pd.DataFrame, column: str) -> float:

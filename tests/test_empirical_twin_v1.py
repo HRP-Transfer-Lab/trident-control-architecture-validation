@@ -99,7 +99,10 @@ def test_empirical_twin_smoke_writes_outputs_without_claims():
     assert (output_dir / "empirical_twin_v1_generator_audit.csv").exists()
     manifest = pd.read_json(output_dir / "empirical_twin_v1_manifest.json", typ="series")
     assert manifest["session_order_context_trend"] == "off"
-    assert manifest["static_tournament_contract_commit"] == "81d22f2"
+    assert (
+        manifest["static_tournament_contract_commit"]
+        == "81d22f2a942afd1652c169935f058b1634922d30"
+    )
 
 
 def test_empirical_twin_audit_diagnostics_report_lag1_degeneracy_without_tournament():
@@ -121,7 +124,7 @@ def test_empirical_twin_audit_diagnostics_report_lag1_degeneracy_without_tournam
             "empirical_background_contract": "EMPIRICAL_BACKGROUND_CONTRACT_V1",
             "empirical_background_contract_commit": "1e9c11e030dc0706c8941dfc08489bb6f63cac5d",
             "static_tournament_contract": "static_tournament_v2",
-            "static_tournament_contract_commit": "81d22f2",
+            "static_tournament_contract_commit": "81d22f2a942afd1652c169935f058b1634922d30",
             "session_order_context_trend": "off",
             "formal_claims_allowed": False,
         },
@@ -234,11 +237,15 @@ def test_background_seed_does_not_change_structural_truth():
         background=background,
         config={**config, "seed": config["seed"] + 1, "structural_seed_override": first.generation_summary["structural_seed"]},
     )
+    assert changed_background.generation_summary["background_seed"] != first.generation_summary["background_seed"]
     assert same_structural.shape[0] == first.dataset.shape[0]
     assert first.dataset[structural_cols].reset_index(drop=True).equals(
         same_structural[[column.replace("synthetic_structural_", "") for column in structural_cols]]
         .rename(columns={column.replace("synthetic_structural_", ""): column for column in structural_cols})
         .reset_index(drop=True)
+    )
+    assert first.dataset[structural_cols].reset_index(drop=True).equals(
+        changed_background.dataset[structural_cols].reset_index(drop=True)
     )
     assert not first.dataset[list(empirical_twin_v1.FEATURES)].equals(
         changed_background.dataset[list(empirical_twin_v1.FEATURES)]
@@ -301,34 +308,149 @@ def test_between_person_component_recovers_target_variance_at_large_n():
     assert np.allclose(realised, np.diag(target), rtol=0.04)
 
 
-def test_window_ar_calibration_recovers_centred_variance_without_double_counting_fatigue():
-    target = np.diag([1.25, 0.75, 0.5, 0.25, 0.1])
-    lag1 = {feature: 0.35 for feature in empirical_twin_v1.FEATURES}
+def test_frozen_lag1_calibration_recovers_short_sequence_estimand():
+    target = 0.35
+    phi = empirical_twin_v1._calibrate_internal_phi_for_frozen_lag1(
+        target,
+        fatigue_slope=0.01,
+        target_window_variance=1.0,
+        windows_per_session=12,
+    )
+    realised = empirical_twin_v1._expected_frozen_lag1_for_phi(
+        phi,
+        fatigue_slope=0.01,
+        target_window_variance=1.0,
+        windows_per_session=12,
+    )
+
+    assert abs(realised - target) <= 0.03
+    assert -0.95 <= phi <= 0.95
+
+
+def test_window_ar_calibration_recovers_full_centred_covariance():
+    diag = np.array([1.25, 0.75, 0.5, 0.35, 0.2])
+    sd = np.sqrt(diag)
+    corr = np.full((len(empirical_twin_v1.FEATURES), len(empirical_twin_v1.FEATURES)), 0.18)
+    np.fill_diagonal(corr, 1.0)
+    target = corr * np.outer(sd, sd)
+    internal_phi = {
+        feature: value
+        for feature, value in zip(
+            empirical_twin_v1.FEATURES,
+            [0.25, 0.30, 0.35, 0.20, 0.28],
+            strict=True,
+        )
+    }
     fatigue = {feature: 0.01 for feature in empirical_twin_v1.FEATURES}
     length = 12
-    calibrated = empirical_twin_v1._calibrate_window_covariance_for_estimand(
+    calibrated, support = empirical_twin_v1._calibrate_window_covariance_for_estimand(
         target,
-        lag1=lag1,
+        internal_phi=internal_phi,
         fatigue=fatigue,
         windows_per_session=length,
     )
+    assert support[0]["support_status"] == "support_eligible_covariance"
     rng = np.random.default_rng(456)
-    realised_rows = []
-    for _ in range(12000):
+    realised_rows = np.zeros_like(target)
+    phi_vec = np.array([internal_phi[feature] for feature in empirical_twin_v1.FEATURES])
+    fatigue_vec = np.array([fatigue[feature] for feature in empirical_twin_v1.FEATURES])
+    n_sequences = 4000
+    for _ in range(n_sequences):
         state = np.zeros(len(empirical_twin_v1.FEATURES))
         rows = []
         for window in range(length):
-            state = 0.35 * state + rng.multivariate_normal(
+            state = phi_vec * state + rng.multivariate_normal(
                 np.zeros(len(empirical_twin_v1.FEATURES)),
                 calibrated,
             )
-            rows.append(state + 0.01 * window)
+            rows.append(state + fatigue_vec * window)
         matrix = np.asarray(rows)
         centred = matrix - matrix.mean(axis=0, keepdims=True)
-        realised_rows.append(np.var(centred, axis=0, ddof=1))
-    realised = np.mean(realised_rows, axis=0)
+        realised_rows += np.cov(centred, rowvar=False, ddof=1)
+    realised = realised_rows / n_sequences
 
-    assert np.allclose(realised, np.diag(target), rtol=0.05)
+    assert np.allclose(np.diag(realised), np.diag(target), rtol=0.08)
+    off_diag = ~np.eye(target.shape[0], dtype=bool)
+    assert np.allclose(realised[off_diag], target[off_diag], rtol=0.18, atol=0.04)
+
+
+def test_repeated_person_stability_audit_exists():
+    background = empirical_twin_v1.load_background_spec(
+        ROOT / "reports/generated/empirical_twin_preflight_v1_full_acdc",
+        ROOT / "reports/generated/empirical_twin_preflight_v1_full_acdc_paired_session",
+    )
+    run = empirical_twin_v1.generate_empirical_twin_dataset(
+        world_id="ETW0",
+        replicate_index=0,
+        background=background,
+        config={
+            "seed": 20260809,
+            "n_templates": 2,
+            "participants_per_template": 4,
+            "sessions_per_participant": 2,
+            "windows_per_session": 3,
+            "use_covariance": True,
+            "session_order_context_trend": "off",
+        },
+    )
+    stability = run.generator_audit[
+        run.generator_audit["parameter"] == "repeated_person_stability"
+    ]
+
+    assert not stability.empty
+    assert set(stability["feature"]).issuperset(set(empirical_twin_v1.FEATURES))
+
+
+def test_acdc_covariance_requires_template_feature_coverage():
+    background = empirical_twin_v1.load_background_spec(
+        ROOT / "reports/generated/empirical_twin_preflight_v1_full_acdc",
+        ROOT / "reports/generated/empirical_twin_preflight_v1_full_acdc_paired_session",
+    )
+    row = background.acdc_cov_window.iloc[0].copy()
+    altered_templates = background.template_summary.copy()
+    mask = (
+        (altered_templates["source_dataset"].astype(str) == str(row["source_dataset"]))
+        & (altered_templates["task_id"].astype(str) == str(row["task_id"]))
+    )
+    altered_templates.loc[mask, f"{row['feature_b']}_coverage"] = 0.5
+    altered = empirical_twin_v1.BackgroundSpec(
+        **{**background.__dict__, "template_summary": altered_templates}
+    )
+
+    status, reason = empirical_twin_v1._acdc_covariance_row_eligible(
+        row,
+        background=altered,
+        level="within_session",
+    )
+
+    assert status == "unsupported"
+    assert "template_feature_coverage_below_0_95" in reason
+
+
+def test_paired_covariance_requires_repeat_participant_threshold():
+    background = empirical_twin_v1.load_background_spec(
+        ROOT / "reports/generated/empirical_twin_preflight_v1_full_acdc",
+        ROOT / "reports/generated/empirical_twin_preflight_v1_full_acdc_paired_session",
+    )
+    row = background.paired_cov_session[
+        (background.paired_cov_session["feature_a"] == "accuracy")
+        & (background.paired_cov_session["feature_b"] == "accuracy")
+    ].iloc[0].copy()
+    altered_variance = background.paired_variance.copy()
+    mask = (
+        (altered_variance["task_id"].astype(str) == str(row["task_id"]))
+        & (altered_variance["feature"].astype(str) == "accuracy")
+    )
+    altered_variance.loc[mask, "n_repeat_participants"] = 29
+
+    status, reason = empirical_twin_v1._paired_covariance_row_eligible(
+        row,
+        features=empirical_twin_v1.FEATURES,
+        paired_variance=altered_variance,
+    )
+
+    assert status == "unsupported"
+    assert "repeat_participants_below_30" in reason
 
 
 def test_primary_config_rejects_cross_task_session_covariance():

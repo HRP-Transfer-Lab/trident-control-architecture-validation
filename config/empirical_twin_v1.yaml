@@ -7,7 +7,7 @@ contract:
   empirical_background_contract: EMPIRICAL_BACKGROUND_CONTRACT_V1
   empirical_background_contract_commit: 1e9c11e030dc0706c8941dfc08489bb6f63cac5d
   static_tournament_contract: static_tournament_v2
-  static_tournament_contract_commit: 81d22f2
+  static_tournament_contract_commit: 81d22f2a942afd1652c169935f058b1634922d30
   session_order_context_trend: off
   formal_claims_allowed: false
 
@@ -27,14 +27,14 @@ generator:
   n_templates: 3
   participants_per_template: 8
   sessions_per_participant: 2
-  windows_per_session: 3
+  windows_per_session: 12
   use_covariance: true
   paired_cross_task_session_covariance: off
   source_task_shift_rule: template_mean_minus_full_acdc_feature_mean
   seed_hierarchy: structural_background_missingness_trial_count
   session_calibration_rule: raw_session_covariance_scaled_by_m_over_m_minus_1_before_participant_centring
-  window_calibration_rule: diagonal_ar_innovation_scaled_to_centred_window_variance_after_fatigue
-  lag1_calibration_rule: internal_ar_parameter_recorded_separately_from_frozen_short_sequence_estimand
+  window_calibration_rule: full_ar_innovation_covariance_scaled_to_centred_window_covariance_after_fatigue_or_diagonal_fallback
+  lag1_calibration_rule: deterministic_grid_calibration_of_internal_phi_to_frozen_short_sequence_pearson_estimand
   trial_count_implementation_status: truncated_normal_from_mean_sd_p10_p90_approximation
 
 tournament_smoke:
