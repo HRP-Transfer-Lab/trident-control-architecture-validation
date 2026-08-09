@@ -1,0 +1,81 @@
+study:
+  id: empirical_twin_v1_pilot
+  stage: M2.7_informative_pilot
+  status: exploratory_informative_pilot
+
+contract:
+  empirical_background_contract: EMPIRICAL_BACKGROUND_CONTRACT_V1
+  empirical_background_contract_commit: 1e9c11e030dc0706c8941dfc08489bb6f63cac5d
+  static_tournament_contract: static_tournament_v2
+  static_tournament_contract_commit: 81d22f2a942afd1652c169935f058b1634922d30
+  generator_commit: 9699427176961a3064e9db8da23a3b287a441b1b
+  audit_correction_commit: 617549288c4ef44ae216473fcc822f4ad6856d3a
+  session_order_context_trend: off
+  formal_claims_allowed: false
+  model_recovery_claim_allowed: false
+
+inputs:
+  acdc_preflight_dir: reports/generated/empirical_twin_preflight_v1_full_acdc
+  paired_preflight_dir: reports/generated/empirical_twin_preflight_v1_full_acdc_paired_session
+  paired_processed_source_checksum: sha256:dd30838e96fbc1a80c42d0cd41161644b1563bccc3901b39ab9e9a1ded0065a0
+  paired_repeated_person_stability_checksum: sha256:6d19f43aa2bef343a0e9e766f548be0cf1b64f66ece097f85267266ecd1e91bc
+
+pilot_design:
+  questions_frozen: true
+  matched_support_intersection:
+    - Stroop
+    - Flanker
+  excluded_primary_tasks:
+    Simon: no_paired_repeated_session_support
+    SART: no_full_acdc_window_template
+  schedule_seed: 20260811
+  template_schedule: deterministic_task_balanced_without_replacement
+  schedule_same_template_pair_across_worlds_per_replicate: true
+  schedule_csv: research-program/M2_7_EMPIRICAL_TWIN_PILOT_SCHEDULE.csv
+  schedule_json: research-program/M2_7_EMPIRICAL_TWIN_PILOT_SCHEDULE.json
+
+generator:
+  seed: 20260810
+  worlds:
+    - ETW0
+    - ETW1
+    - ETW2
+    - ETW3
+    - ETW4
+  replicates_per_world: 10
+  n_templates: 2
+  participants_per_template: 24
+  sessions_per_participant: 2
+  windows_per_session: 16
+  use_covariance: true
+  session_order_context_trend: off
+  paired_cross_task_session_covariance: off
+  source_task_shift_rule: template_mean_minus_full_acdc_feature_mean
+  seed_hierarchy: structural_background_missingness_trial_count
+  session_calibration_rule: raw_session_covariance_scaled_by_m_over_m_minus_1_before_participant_centring
+  window_calibration_rule: full_ar_innovation_covariance_scaled_to_centred_window_covariance_after_fatigue_or_diagonal_fallback
+  lag1_calibration_rule: deterministic_grid_calibration_of_internal_phi_to_frozen_short_sequence_pearson_estimand
+  trial_count_implementation_status: truncated_normal_from_mean_sd_p10_p90_approximation
+
+tournament:
+  test_fraction: 0.25
+  practical_equivalence_margin: 0.01
+  paired_ci_z: 1.96
+  models:
+    - M0_probabilistic_general_performance
+    - M1_continuous_control_manifold
+    - M2_EM_v1
+    - M3_three_profile_mixture
+    - M4_four_pace_profile_mixture
+
+execution:
+  process_workers: 2
+  progress_interval_seconds: 15
+  checkpoint_required: true
+  resume_required: true
+  atomic_checkpoint_writes: true
+  preserve_failed_units_in_reports: true
+  blas_threads_per_worker: 1
+
+outputs:
+  directory: reports/generated/empirical_twin_v1_pilot

@@ -377,7 +377,7 @@ def generate_empirical_twin_dataset(
     background_rng = np.random.default_rng(seed_schedule["background_seed"])
     missingness_rng = np.random.default_rng(seed_schedule["missingness_seed"])
     trial_count_rng = np.random.default_rng(seed_schedule["trial_count_seed"])
-    templates = _select_templates(background.template_summary, int(config["n_templates"]))
+    templates = _templates_from_generation_config(background.template_summary, config)
     base = _make_m2_7_structural_world(
         world_id,
         seed=seed_schedule["structural_seed"],
@@ -1684,6 +1684,27 @@ def _select_templates(template_summary: pd.DataFrame, n_templates: int) -> pd.Da
             remaining.iloc[index] for index in range(n_templates - len(selected_rows))
         )
     return pd.DataFrame(selected_rows).reset_index(drop=True)
+
+
+def _templates_from_generation_config(
+    template_summary: pd.DataFrame,
+    config: dict[str, Any],
+) -> pd.DataFrame:
+    records = config.get("template_records")
+    if records is None:
+        return _select_templates(template_summary, int(config["n_templates"]))
+    templates = pd.DataFrame(records)
+    if templates.empty:
+        raise ValueError("template_records must not be empty")
+    missing = {"source_dataset", "task_id"}.difference(templates.columns)
+    if missing:
+        raise ValueError("template_records missing columns: " + ", ".join(sorted(missing)))
+    expected = int(config["n_templates"])
+    if templates.shape[0] != expected:
+        raise ValueError(
+            f"template_records contains {templates.shape[0]} rows but n_templates is {expected}"
+        )
+    return templates.reset_index(drop=True)
 
 
 def _template_for_generated_source(templates: pd.DataFrame, source: object) -> pd.Series:
