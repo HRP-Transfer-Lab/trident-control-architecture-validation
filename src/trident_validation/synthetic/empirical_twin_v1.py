@@ -854,7 +854,12 @@ def build_generator_audit(
                     task,
                     "repeated_person_stability",
                     feature,
-                    _paired_target_stability(background.paired_stability, task, feature),
+                    _paired_target_stability(
+                        background.paired_stability,
+                        task,
+                        feature,
+                        fallback_variance=background.paired_variance,
+                    ),
                     _realised_repeated_person_stability(person_session_frame, feature)
                     if not person_session_frame.empty
                     else _realised_repeated_person_stability(frame, feature),
@@ -2550,19 +2555,32 @@ def _paired_target_variance(frame: pd.DataFrame, task: str, feature: str) -> flo
     return max(_as_float(rows.iloc[0]["session_within_participant_variance"], default=0.0), 0.0)
 
 
-def _paired_target_stability(frame: pd.DataFrame, task: str, feature: str) -> float:
-    if frame.empty:
+def _paired_target_stability(
+    frame: pd.DataFrame,
+    task: str,
+    feature: str,
+    *,
+    fallback_variance: pd.DataFrame | None = None,
+) -> float:
+    if not frame.empty:
+        rows = frame[
+            (frame["task_id"].astype(str) == str(task))
+            & (frame["feature"].astype(str) == str(feature))
+            & (frame["contract_support_status"].astype(str) == "estimated")
+        ]
+        if not rows.empty and _as_float(rows.iloc[0].get("n_repeat_participants"), default=0.0) >= 30:
+            return _as_float(rows.iloc[0].get("repeat_person_stability_icc"))
+    if fallback_variance is None or fallback_variance.empty:
         return float("nan")
-    rows = frame[
-        (frame["task_id"].astype(str) == str(task))
-        & (frame["feature"].astype(str) == str(feature))
-        & (frame["contract_support_status"].astype(str) == "estimated")
+    rows = fallback_variance[
+        (fallback_variance["task_id"].astype(str) == str(task))
+        & (fallback_variance["feature"].astype(str) == str(feature))
+        & (fallback_variance["between_support_status"].astype(str) == "estimated")
+        & (fallback_variance["session_support_status"].astype(str) == "estimated")
     ]
-    if rows.empty:
+    if rows.empty or _as_float(rows.iloc[0].get("n_repeat_participants"), default=0.0) < 30:
         return float("nan")
-    if _as_float(rows.iloc[0].get("n_repeat_participants"), default=0.0) < 30:
-        return float("nan")
-    return _as_float(rows.iloc[0].get("repeat_person_stability_icc"))
+    return _as_float(rows.iloc[0].get("between_participant_fraction"))
 
 
 def _finalise_generated_bounds(frame: pd.DataFrame) -> pd.DataFrame:
