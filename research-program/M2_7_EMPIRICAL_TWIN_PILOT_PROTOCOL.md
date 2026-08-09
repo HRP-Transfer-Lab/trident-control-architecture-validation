@@ -89,7 +89,7 @@ Flanker templates without replacement from the frozen eligible-template table.
 For replicate `r`, the same template pair is used across ETW0-ETW4.
 
 Schedule hash:
-`sha256:c712eff7a52ad2601760d9fb15b253c46a299c803b73ed093c9e9372f271a81a`.
+`sha256:4e90e0ea6f368f2430a5138dd69bcd2c03b34ad8bfad29e182a53df436099b3a`.
 
 ## Frozen Pilot Questions
 

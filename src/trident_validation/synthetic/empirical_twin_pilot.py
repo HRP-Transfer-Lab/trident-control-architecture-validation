@@ -7,6 +7,7 @@ from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import time
@@ -56,6 +57,16 @@ BLAS_THREAD_ENV = {
     "MKL_NUM_THREADS": "1",
     "OPENBLAS_NUM_THREADS": "1",
 }
+EXPLORATORY_REPLICATES_PER_WORLD = 10
+DISCRETE_MODEL_IDS = ("M3_three_profile_mixture", "M4_four_pace_profile_mixture")
+CONTINUOUS_WORLD_IDS = ("ETW0", "ETW1", "ETW2")
+FROZEN_DISCRETE_CONTRASTS = (
+    ("ETW3", "M3_three_profile_mixture - M1_continuous_control_manifold"),
+    ("ETW3", "M3_three_profile_mixture - M2_EM_v1"),
+    ("ETW4", "M4_four_pace_profile_mixture - M3_three_profile_mixture"),
+    ("ETW4", "M4_four_pace_profile_mixture - M1_continuous_control_manifold"),
+    ("ETW4", "M4_four_pace_profile_mixture - M2_EM_v1"),
+)
 
 
 def run_empirical_twin_v1_pilot(
@@ -152,9 +163,13 @@ def prepare_pilot_schedule(
     schedule_json = Path(config["pilot_design"]["schedule_json"])
     for existing_path in (schedule_csv, output_dir / "pilot_schedule.csv"):
         if existing_path.exists():
-            existing_hash = _dataframe_hash(pd.read_csv(existing_path))
+            existing = pd.read_csv(existing_path)
+            existing_hash = _dataframe_hash(existing)
             if existing_hash != schedule_hash:
-                raise ValueError(f"pilot schedule mismatch at {existing_path}: {existing_hash} != {schedule_hash}")
+                if not _same_schedule_except_task_index(existing, schedule):
+                    raise ValueError(
+                        f"pilot schedule mismatch at {existing_path}: {existing_hash} != {schedule_hash}"
+                    )
     _atomic_write_csv(schedule_csv, schedule)
     _atomic_write_json(schedule_json, schedule.to_dict(orient="records"))
     _atomic_write_csv(output_dir / "pilot_schedule.csv", schedule)
@@ -239,6 +254,12 @@ def aggregate_pilot_outputs(
     contrasts = paired_contrasts(participant_scores)
     background_summary = background_realism_summary(background)
     runtime_summary = runtime_summary_table(runtime)
+    world_selection_summary = world_by_model_selection_summary(selections)
+    false_discrete_summary = false_discrete_pilot_summary(selections)
+    etw0_diagnostics = etw0_m0_m1_diagnostics(participant_scores, diagnostics)
+    etw2_diagnostics = etw2_m2_em_diagnostics(participant_scores, diagnostics)
+    discrete_summary = discrete_contrast_summary(contrasts)
+    failure_runtime = failure_runtime_summary(diagnostics, runtime)
 
     paths = {
         "model_scores": output_dir / "model_scores.csv",
@@ -249,6 +270,12 @@ def aggregate_pilot_outputs(
         "runtime_summary": output_dir / "runtime_summary.csv",
         "background_realism_summary": output_dir / "background_realism_summary.csv",
         "support_summary": output_dir / "support_summary.csv",
+        "world_model_selection_summary": output_dir / "world_model_selection_summary.csv",
+        "false_discrete_pilot_summary": output_dir / "false_discrete_pilot_summary.csv",
+        "etw0_m0_m1_diagnostics": output_dir / "etw0_m0_m1_diagnostics.csv",
+        "etw2_m2_em_diagnostics": output_dir / "etw2_m2_em_diagnostics.csv",
+        "discrete_contrasts_summary": output_dir / "discrete_contrasts_summary.csv",
+        "failure_runtime_summary": output_dir / "failure_runtime_summary.csv",
     }
     for key, frame in {
         "model_scores": model_scores,
@@ -259,12 +286,31 @@ def aggregate_pilot_outputs(
         "runtime_summary": runtime_summary,
         "background_realism_summary": background_summary,
         "support_summary": support,
+        "world_model_selection_summary": world_selection_summary,
+        "false_discrete_pilot_summary": false_discrete_summary,
+        "etw0_m0_m1_diagnostics": etw0_diagnostics,
+        "etw2_m2_em_diagnostics": etw2_diagnostics,
+        "discrete_contrasts_summary": discrete_summary,
+        "failure_runtime_summary": failure_runtime,
     }.items():
         _atomic_write_csv(paths[key], frame)
     report_path = output_dir / "M2_7_EMPIRICAL_TWIN_PILOT_REPORT.md"
     _atomic_write_text(
         report_path,
-        pilot_report(model_scores, selections, contrasts, diagnostics, runtime_summary, background_summary),
+        pilot_report(
+            model_scores=model_scores,
+            selections=selections,
+            contrasts=contrasts,
+            diagnostics=diagnostics,
+            runtime_summary=runtime_summary,
+            background_summary=background_summary,
+            world_selection_summary=world_selection_summary,
+            false_discrete_summary=false_discrete_summary,
+            etw0_diagnostics=etw0_diagnostics,
+            etw2_diagnostics=etw2_diagnostics,
+            discrete_summary=discrete_summary,
+            failure_runtime=failure_runtime,
+        ),
     )
     manifest = _pilot_manifest(
         config,
@@ -342,8 +388,9 @@ def background_realism_summary(generator_audit: pd.DataFrame) -> pd.DataFrame:
     ].copy()
     if finite.empty:
         return pd.DataFrame()
+    finite["parameter_family"] = finite["parameter"].map(_background_parameter_family)
     return (
-        finite.groupby(["world_id", "parameter", "feature"], dropna=False)
+        finite.groupby(["world_id", "parameter_family", "parameter", "feature"], dropna=False)
         .agg(
             n_rows=("absolute_delta", "size"),
             target_mean=("target", "mean"),
@@ -353,6 +400,472 @@ def background_realism_summary(generator_audit: pd.DataFrame) -> pd.DataFrame:
         )
         .reset_index()
     )
+
+
+def world_by_model_selection_summary(selections: pd.DataFrame) -> pd.DataFrame:
+    columns = [
+        "world_id",
+        "model_id",
+        "n_units",
+        "numerical_best_count",
+        "numerical_best_rate",
+        "numerical_best_wilson95_low",
+        "numerical_best_wilson95_high",
+        "selected_count",
+        "selected_rate",
+        "selected_wilson95_low",
+        "selected_wilson95_high",
+        "same_tier_ambiguity_count",
+        "same_tier_ambiguity_rate",
+        "same_tier_ambiguity_wilson95_low",
+        "same_tier_ambiguity_wilson95_high",
+        "normalisation_sensitive_count",
+        "normalisation_sensitive_rate",
+        "normalisation_sensitive_wilson95_low",
+        "normalisation_sensitive_wilson95_high",
+        "exploratory_n_per_world",
+        "rate_label",
+    ]
+    if selections.empty:
+        return pd.DataFrame(columns=columns)
+    complete = _complete_selections(selections)
+    rows: list[dict[str, Any]] = []
+    for world_id in M2_7_EMPIRICAL_TWIN_WORLD_REGISTRY:
+        world = complete[complete["world_id"].astype(str) == world_id]
+        denominator = int(world.shape[0])
+        ambiguity_count = int(_boolean_sum(world.get("same_tier_ambiguous", pd.Series(dtype=bool))))
+        normalisation_count = int(_boolean_sum(world.get("normalisation_sensitive", pd.Series(dtype=bool))))
+        ambiguity_low, ambiguity_high = _wilson_interval(ambiguity_count, denominator)
+        normalisation_low, normalisation_high = _wilson_interval(normalisation_count, denominator)
+        for model_id in STATIC_V2_MODEL_IDS:
+            numerical_count = int((world.get("numerical_best_model_id", pd.Series(dtype=str)).astype(str) == model_id).sum())
+            selected_count = int((world.get("selected_model_id", pd.Series(dtype=str)).astype(str) == model_id).sum())
+            numerical_low, numerical_high = _wilson_interval(numerical_count, denominator)
+            selected_low, selected_high = _wilson_interval(selected_count, denominator)
+            rows.append(
+                {
+                    "world_id": world_id,
+                    "model_id": model_id,
+                    "n_units": denominator,
+                    "numerical_best_count": numerical_count,
+                    "numerical_best_rate": _safe_rate(numerical_count, denominator),
+                    "numerical_best_wilson95_low": numerical_low,
+                    "numerical_best_wilson95_high": numerical_high,
+                    "selected_count": selected_count,
+                    "selected_rate": _safe_rate(selected_count, denominator),
+                    "selected_wilson95_low": selected_low,
+                    "selected_wilson95_high": selected_high,
+                    "same_tier_ambiguity_count": ambiguity_count,
+                    "same_tier_ambiguity_rate": _safe_rate(ambiguity_count, denominator),
+                    "same_tier_ambiguity_wilson95_low": ambiguity_low,
+                    "same_tier_ambiguity_wilson95_high": ambiguity_high,
+                    "normalisation_sensitive_count": normalisation_count,
+                    "normalisation_sensitive_rate": _safe_rate(normalisation_count, denominator),
+                    "normalisation_sensitive_wilson95_low": normalisation_low,
+                    "normalisation_sensitive_wilson95_high": normalisation_high,
+                    "exploratory_n_per_world": EXPLORATORY_REPLICATES_PER_WORLD,
+                    "rate_label": "exploratory_pilot_n10_imprecise",
+                }
+            )
+    return pd.DataFrame(rows, columns=columns)
+
+
+def false_discrete_pilot_summary(selections: pd.DataFrame) -> pd.DataFrame:
+    columns = [
+        "scope",
+        "world_id",
+        "selected_model_set",
+        "numerator",
+        "denominator",
+        "rate",
+        "wilson95_low",
+        "wilson95_high",
+        "diagnostic_label",
+    ]
+    if selections.empty:
+        return pd.DataFrame(columns=columns)
+    complete = _complete_selections(selections)
+    rows: list[dict[str, Any]] = []
+    for world_id in CONTINUOUS_WORLD_IDS:
+        world = complete[complete["world_id"].astype(str) == world_id]
+        rows.append(_false_discrete_row(world, scope="world", world_id=world_id))
+    combined = complete[complete["world_id"].astype(str).isin(CONTINUOUS_WORLD_IDS)]
+    rows.append(_false_discrete_row(combined, scope="combined_continuous_ETW0_ETW2", world_id="ETW0_ETW1_ETW2"))
+    return pd.DataFrame(rows, columns=columns)
+
+
+def etw0_m0_m1_diagnostics(participant_scores: pd.DataFrame, diagnostics: pd.DataFrame) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    diff = _paired_density_differences(
+        participant_scores,
+        world_id="ETW0",
+        model_a="M1_continuous_control_manifold",
+        model_b="M0_probabilistic_general_performance",
+    )
+    rows.append(
+        _numeric_summary_row(
+            diff["delta"] if "delta" in diff else pd.Series(dtype=float),
+            metric="M1_minus_M0_participant_isolated_heldout_density",
+            world_id="ETW0",
+            model_id="M1_continuous_control_manifold",
+            sample_unit="participant_pairs",
+            interpretation_guard="do_not_treat_small_density_advantage_as_substantive_multidimensionality",
+        )
+    )
+    m1 = _diagnostic_rows(diagnostics, world_id="ETW0", model_id="M1_continuous_control_manifold")
+    for column in ("second_first_eigenvalue_ratio", "second_loading_fraction"):
+        rows.append(
+            _numeric_summary_row(
+                pd.to_numeric(m1.get(column, pd.Series(dtype=float)), errors="coerce"),
+                metric=f"M1_{column}",
+                world_id="ETW0",
+                model_id="M1_continuous_control_manifold",
+                sample_unit="replicates",
+                interpretation_guard="prospective_dimensionality_diagnostic_no_posthoc_threshold_change",
+            )
+        )
+    return pd.DataFrame(rows)
+
+
+def etw2_m2_em_diagnostics(participant_scores: pd.DataFrame, diagnostics: pd.DataFrame) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    diff = _paired_density_differences(
+        participant_scores,
+        world_id="ETW2",
+        model_a="M2_EM_v1",
+        model_b="M1_continuous_control_manifold",
+    )
+    rows.append(
+        _numeric_summary_row(
+            diff["delta"] if "delta" in diff else pd.Series(dtype=float),
+            metric="M2_EM_v1_minus_M1_participant_isolated_heldout_density",
+            world_id="ETW2",
+            model_id="M2_EM_v1",
+            sample_unit="participant_pairs",
+            interpretation_guard="strict_convergence_not_newly_required_for_valid_score",
+        )
+    )
+    em = _diagnostic_rows(diagnostics, world_id="ETW2", model_id="M2_EM_v1")
+    for column in (
+        "em_n_iter",
+        "em_final_likelihood_change",
+        "em_final_parameter_change",
+        "residual_variance_mean",
+        "residual_variance_min",
+        "residual_variance_max",
+        "runtime_seconds",
+    ):
+        rows.append(
+            _numeric_summary_row(
+                pd.to_numeric(em.get(column, pd.Series(dtype=float)), errors="coerce"),
+                metric=column,
+                world_id="ETW2",
+                model_id="M2_EM_v1",
+                sample_unit="replicates",
+                interpretation_guard="strict_convergence_not_newly_required_for_valid_score",
+            )
+        )
+    for column, metric in (
+        ("em_converged", "em_converged_rate"),
+        ("em_iteration_cap_flag", "em_iteration_cap_rate"),
+    ):
+        numerator = int(_boolean_sum(em.get(column, pd.Series(dtype=bool))))
+        denominator = int(em.shape[0])
+        low, high = _wilson_interval(numerator, denominator)
+        rows.append(
+            {
+                "world_id": "ETW2",
+                "model_id": "M2_EM_v1",
+                "metric": metric,
+                "sample_unit": "replicates",
+                "n": denominator,
+                "numerator": numerator,
+                "denominator": denominator,
+                "rate": _safe_rate(numerator, denominator),
+                "wilson95_low": low,
+                "wilson95_high": high,
+                "mean": float("nan"),
+                "median": float("nan"),
+                "sd": float("nan"),
+                "min": float("nan"),
+                "max": float("nan"),
+                "interpretation_guard": "strict_convergence_not_newly_required_for_valid_score",
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def discrete_contrast_summary(contrasts: pd.DataFrame) -> pd.DataFrame:
+    columns = [
+        "world_id",
+        "contrast",
+        "n_replicates",
+        "n_participant_pairs_total",
+        "mean_delta",
+        "median_delta",
+        "sd_replicate_mean_delta",
+    ]
+    if contrasts.empty:
+        return pd.DataFrame(columns=columns)
+    rows: list[dict[str, Any]] = []
+    for world_id, contrast in FROZEN_DISCRETE_CONTRASTS:
+        subset = contrasts[
+            (contrasts["world_id"].astype(str) == world_id)
+            & (contrasts["contrast"].astype(str) == contrast)
+        ]
+        values = pd.to_numeric(subset.get("mean_delta", pd.Series(dtype=float)), errors="coerce").dropna()
+        rows.append(
+            {
+                "world_id": world_id,
+                "contrast": contrast,
+                "n_replicates": int(values.shape[0]),
+                "n_participant_pairs_total": int(
+                    pd.to_numeric(
+                        subset.get("n_participants", pd.Series(dtype=float)),
+                        errors="coerce",
+                    ).sum()
+                ),
+                "mean_delta": float(values.mean()) if not values.empty else float("nan"),
+                "median_delta": float(values.median()) if not values.empty else float("nan"),
+                "sd_replicate_mean_delta": float(values.std(ddof=1)) if values.shape[0] > 1 else float("nan"),
+            }
+        )
+    return pd.DataFrame(rows, columns=columns)
+
+
+def failure_runtime_summary(diagnostics: pd.DataFrame, runtime: pd.DataFrame) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    if not diagnostics.empty:
+        for (world_id, model_id), group in diagnostics.groupby(["world_id", "model_id"], dropna=False):
+            denominator = int(group.shape[0])
+            numerator = int((group.get("fit_status", pd.Series(dtype=str)).astype(str) != "success").sum())
+            low, high = _wilson_interval(numerator, denominator)
+            rows.append(
+                {
+                    "summary": "fit_failures_by_world_model",
+                    "world_id": world_id,
+                    "model_id": model_id,
+                    "metric": "fit_failure_rate",
+                    "numerator": numerator,
+                    "denominator": denominator,
+                    "rate": _safe_rate(numerator, denominator),
+                    "wilson95_low": low,
+                    "wilson95_high": high,
+                    "n": denominator,
+                    "mean": float("nan"),
+                    "median": float("nan"),
+                    "total": float("nan"),
+                }
+            )
+            model_runtime = pd.to_numeric(group.get("runtime_seconds", pd.Series(dtype=float)), errors="coerce").dropna()
+            rows.append(_runtime_summary_row(model_runtime, "runtime_by_world_model", world_id, model_id, "runtime_seconds"))
+    if not runtime.empty:
+        for world_id, group in runtime.groupby("world_id", dropna=False):
+            denominator = int(group.shape[0])
+            numerator = int((group.get("status", pd.Series(dtype=str)).astype(str) != "complete").sum())
+            low, high = _wilson_interval(numerator, denominator)
+            rows.append(
+                {
+                    "summary": "unit_failures_by_world",
+                    "world_id": world_id,
+                    "model_id": "ALL",
+                    "metric": "unit_failure_rate",
+                    "numerator": numerator,
+                    "denominator": denominator,
+                    "rate": _safe_rate(numerator, denominator),
+                    "wilson95_low": low,
+                    "wilson95_high": high,
+                    "n": denominator,
+                    "mean": float("nan"),
+                    "median": float("nan"),
+                    "total": float("nan"),
+                }
+            )
+            values = pd.to_numeric(group.get("unit_runtime_seconds", pd.Series(dtype=float)), errors="coerce").dropna()
+            rows.append(_runtime_summary_row(values, "runtime_by_world", world_id, "ALL", "unit_runtime_seconds"))
+        values = pd.to_numeric(runtime.get("unit_runtime_seconds", pd.Series(dtype=float)), errors="coerce").dropna()
+        rows.append(_runtime_summary_row(values, "runtime_total", "ALL", "ALL", "unit_runtime_seconds"))
+    return pd.DataFrame(rows)
+
+
+def _same_schedule_except_task_index(existing: pd.DataFrame, current: pd.DataFrame) -> bool:
+    if list(existing.columns) != list(current.columns):
+        return False
+    if "task_index" not in existing.columns:
+        return False
+    existing_without_index = existing.drop(columns=["task_index"])
+    current_without_index = current.drop(columns=["task_index"])
+    return _dataframe_hash(existing_without_index) == _dataframe_hash(current_without_index)
+
+
+def _background_parameter_family(parameter: object) -> str:
+    name = str(parameter)
+    if name == "source_task_shift":
+        return "source_task_shift"
+    if name.startswith("between_person"):
+        return "between_person"
+    if name.startswith("session_within_person"):
+        return "session"
+    if name.startswith("window_within_session"):
+        return "window"
+    if name.startswith("lag1"):
+        return "lag1"
+    if name.startswith("missingness"):
+        return "missingness"
+    if name.startswith("trial_count"):
+        return "trial_count"
+    if name.startswith("repeated_person_stability"):
+        return "repeated_person_stability"
+    return "other"
+
+
+def _complete_selections(selections: pd.DataFrame) -> pd.DataFrame:
+    if selections.empty:
+        return selections.copy()
+    if "selection_status" not in selections:
+        return selections.copy()
+    return selections[selections["selection_status"].astype(str) == "complete"].copy()
+
+
+def _boolean_sum(values: pd.Series) -> int:
+    if values.empty:
+        return 0
+    if values.dtype == bool:
+        return int(values.sum())
+    lowered = values.astype(str).str.lower()
+    return int(lowered.isin({"true", "1", "yes"}).sum())
+
+
+def _safe_rate(numerator: int, denominator: int) -> float:
+    return float(numerator / denominator) if denominator else float("nan")
+
+
+def _wilson_interval(numerator: int, denominator: int, *, z: float = 1.96) -> tuple[float, float]:
+    if denominator <= 0:
+        return float("nan"), float("nan")
+    p = numerator / denominator
+    denominator_adj = 1.0 + z**2 / denominator
+    centre = (p + z**2 / (2.0 * denominator)) / denominator_adj
+    half_width = (
+        z
+        * math.sqrt((p * (1.0 - p) + z**2 / (4.0 * denominator)) / denominator)
+        / denominator_adj
+    )
+    return float(max(0.0, centre - half_width)), float(min(1.0, centre + half_width))
+
+
+def _false_discrete_row(frame: pd.DataFrame, *, scope: str, world_id: str) -> dict[str, Any]:
+    denominator = int(frame.shape[0])
+    numerator = int(frame.get("selected_model_id", pd.Series(dtype=str)).astype(str).isin(DISCRETE_MODEL_IDS).sum())
+    low, high = _wilson_interval(numerator, denominator)
+    return {
+        "scope": scope,
+        "world_id": world_id,
+        "selected_model_set": "M3_or_M4",
+        "numerator": numerator,
+        "denominator": denominator,
+        "rate": _safe_rate(numerator, denominator),
+        "wilson95_low": low,
+        "wilson95_high": high,
+        "diagnostic_label": "pilot_false_discrete_selection_diagnostic_not_confirmatory_error_rate",
+    }
+
+
+def _paired_density_differences(
+    participant_scores: pd.DataFrame,
+    *,
+    world_id: str,
+    model_a: str,
+    model_b: str,
+) -> pd.DataFrame:
+    if participant_scores.empty:
+        return pd.DataFrame(columns=["world_id", "replicate_index", "participant_key", "delta"])
+    subset = participant_scores[participant_scores["world_id"].astype(str) == world_id]
+    if subset.empty:
+        return pd.DataFrame(columns=["world_id", "replicate_index", "participant_key", "delta"])
+    wide = subset.pivot_table(
+        index=["world_id", "replicate_index", "participant_key"],
+        columns="model_id",
+        values="heldout_log_density",
+    )
+    if model_a not in wide or model_b not in wide:
+        return pd.DataFrame(columns=["world_id", "replicate_index", "participant_key", "delta"])
+    output = wide[[model_a, model_b]].dropna().reset_index()
+    output["delta"] = pd.to_numeric(output[model_a], errors="coerce") - pd.to_numeric(output[model_b], errors="coerce")
+    return output.loc[:, ["world_id", "replicate_index", "participant_key", "delta"]]
+
+
+def _diagnostic_rows(diagnostics: pd.DataFrame, *, world_id: str, model_id: str) -> pd.DataFrame:
+    if diagnostics.empty:
+        return pd.DataFrame()
+    return diagnostics[
+        (diagnostics["world_id"].astype(str) == world_id)
+        & (diagnostics["model_id"].astype(str) == model_id)
+    ].copy()
+
+
+def _numeric_summary_row(
+    values: pd.Series,
+    *,
+    metric: str,
+    world_id: str,
+    model_id: str,
+    sample_unit: str,
+    interpretation_guard: str,
+) -> dict[str, Any]:
+    finite = pd.to_numeric(values, errors="coerce").dropna()
+    return {
+        "world_id": world_id,
+        "model_id": model_id,
+        "metric": metric,
+        "sample_unit": sample_unit,
+        "n": int(finite.shape[0]),
+        "numerator": np.nan,
+        "denominator": np.nan,
+        "rate": np.nan,
+        "wilson95_low": np.nan,
+        "wilson95_high": np.nan,
+        "mean": float(finite.mean()) if not finite.empty else float("nan"),
+        "median": float(finite.median()) if not finite.empty else float("nan"),
+        "sd": float(finite.std(ddof=1)) if finite.shape[0] > 1 else float("nan"),
+        "min": float(finite.min()) if not finite.empty else float("nan"),
+        "max": float(finite.max()) if not finite.empty else float("nan"),
+        "interpretation_guard": interpretation_guard,
+    }
+
+
+def _runtime_summary_row(
+    values: pd.Series,
+    summary: str,
+    world_id: object,
+    model_id: object,
+    metric: str,
+) -> dict[str, Any]:
+    finite = pd.to_numeric(values, errors="coerce").dropna()
+    return {
+        "summary": summary,
+        "world_id": world_id,
+        "model_id": model_id,
+        "metric": metric,
+        "numerator": np.nan,
+        "denominator": np.nan,
+        "rate": np.nan,
+        "wilson95_low": np.nan,
+        "wilson95_high": np.nan,
+        "n": int(finite.shape[0]),
+        "mean": float(finite.mean()) if not finite.empty else float("nan"),
+        "median": float(finite.median()) if not finite.empty else float("nan"),
+        "total": float(finite.sum()) if not finite.empty else float("nan"),
+    }
+
+
+def _frame_section(title: str, frame: pd.DataFrame, note: str) -> list[str]:
+    lines = [f"## {title}", "", note, ""]
+    if frame.empty:
+        lines += ["No rows available.", ""]
+    else:
+        lines += [frame.to_string(index=False), ""]
+    return lines
 
 
 def runtime_summary_table(runtime: pd.DataFrame) -> pd.DataFrame:
@@ -371,28 +884,69 @@ def runtime_summary_table(runtime: pd.DataFrame) -> pd.DataFrame:
 
 
 def pilot_report(
+    *,
     model_scores: pd.DataFrame,
     selections: pd.DataFrame,
     contrasts: pd.DataFrame,
     diagnostics: pd.DataFrame,
     runtime_summary: pd.DataFrame,
     background_summary: pd.DataFrame,
+    world_selection_summary: pd.DataFrame,
+    false_discrete_summary: pd.DataFrame,
+    etw0_diagnostics: pd.DataFrame,
+    etw2_diagnostics: pd.DataFrame,
+    discrete_summary: pd.DataFrame,
+    failure_runtime: pd.DataFrame,
 ) -> str:
     lines = [
         "# M2.7 Empirical-Twin Pilot Report",
         "",
         "**Status:** EXPLORATORY / INFORMATIVE PILOT",
         "",
+        "n = 10 replicates/world.",
+        "No confirmatory architecture-recovery claim.",
         "No confirmatory M2.7 recovery claim is made.",
-        "No Trident-G/APC/PACE validation claim is made.",
+        "No Trident-G/APC/PACE/neural-criticality/cusp validation claim is made.",
+        "",
+        "Pilot rates are exploratory and imprecise; Wilson intervals are descriptive.",
         "",
     ]
+    lines += _frame_section(
+        "World-By-Model Selection",
+        world_selection_summary,
+        "Numerical-best, selected-model, same-tier ambiguity and normalisation-sensitive counts/rates.",
+    )
+    lines += _frame_section(
+        "False-Discrete Pilot Diagnostic",
+        false_discrete_summary,
+        "Selected model in {M3, M4} under continuous ETW0-ETW2 truth; not a confirmatory error rate.",
+    )
+    lines += _frame_section(
+        "ETW0 M0/M1 Diagnostics",
+        etw0_diagnostics,
+        "A small M1 density advantage alone is not interpreted as substantive multidimensionality.",
+    )
+    lines += _frame_section(
+        "ETW2 M2_EM_v1 Diagnostics",
+        etw2_diagnostics,
+        "Strict EM convergence is not newly required for a valid score under the frozen contract.",
+    )
+    lines += _frame_section(
+        "ETW3/ETW4 Discrete Contrasts",
+        discrete_summary,
+        "Frozen discrete-world contrasts specified before outcome inspection.",
+    )
+    lines += _frame_section(
+        "Failures And Runtime",
+        failure_runtime,
+        "Fit failures, unit failures, runtime/twin, runtime/model and total runtime.",
+    )
     if not selections.empty:
         selected = selections.groupby(["world_id", "selected_model_id"]).size().reset_index(name="count")
         numerical = selections.groupby(["world_id", "numerical_best_model_id"]).size().reset_index(name="count")
         ambiguity = selections.groupby("world_id")["same_tier_ambiguous"].mean().reset_index(name="ambiguity_rate")
         lines += [
-            "## Selection Summary",
+            "## Legacy Selection Detail",
             "",
             selected.to_string(index=False),
             "",
@@ -418,12 +972,12 @@ def pilot_report(
             .agg(["mean", "median", "count"])
             .reset_index()
         )
-        lines += ["## Frozen Contrasts", "", contrast_summary.to_string(index=False), ""]
+        lines += ["## Legacy Frozen Contrasts Detail", "", contrast_summary.to_string(index=False), ""]
     if not diagnostics.empty:
         failure = diagnostics.groupby(["world_id", "model_id", "fit_status"]).size().reset_index(name="count")
-        lines += ["## Fit Diagnostics", "", failure.to_string(index=False), ""]
+        lines += ["## Legacy Fit Diagnostics Detail", "", failure.to_string(index=False), ""]
     if not runtime_summary.empty:
-        lines += ["## Runtime", "", runtime_summary.tail(8).to_string(index=False), ""]
+        lines += ["## Runtime Detail", "", runtime_summary.tail(8).to_string(index=False), ""]
     if not background_summary.empty:
         lines += ["## Background Realism", "", background_summary.head(80).to_string(index=False), ""]
     lines += [
@@ -733,12 +1287,12 @@ def _build_schedule(
                 for task in tasks
             }
         )
-        for world_id in worlds:
+        for world_offset, world_id in enumerate(worlds):
             seed_schedule = _seed_schedule(master_seed, world_id, replicate_index)
             run_id = _run_id(EMPIRICAL_TWIN_V1_ID, world_id, replicate_index, master_seed)
             rows.append(
                 {
-                    "task_index": replicate_index,
+                    "task_index": replicate_index * len(worlds) + world_offset,
                     "unit_id": f"{world_id}_replicate_{replicate_index:03d}",
                     "world_id": world_id,
                     "aligned_model_id": M2_7_EMPIRICAL_TWIN_WORLD_REGISTRY[world_id]["aligned_model_id"],
