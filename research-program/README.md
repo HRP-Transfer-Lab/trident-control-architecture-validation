@@ -56,6 +56,22 @@ Stroop-Flanker-SART source roles, support thresholds, unsupported quantities,
 pooling/shrinkage rules and the decision to carry the online -> lab1 -> lab2
 trend only as a labelled session-order/context sensitivity setting.
 
+### `M2_7_EMPIRICAL_TWIN_PILOT_REVIEW.md`
+
+Banks the exploratory M2.7 empirical-twin pilot as a modelling-substrate
+constraint. It records that M2.7 is not a Trident-G validation test, that
+continuous/nonlinear structure remains useful under realistic nuisance, that
+static M3/M4 profile recovery is weak in the pilot and that no post-hoc
+retuning of M2.7 is authorised.
+
+### `M2_8_MECHANISTIC_SYNTHETIC_IDENTIFIABILITY_PROTOCOL.md`
+
+Drafts the next known-truth synthetic milestone. M2.8 shifts the question from
+"which static latent model wins?" to whether mechanistic variables such as
+capacity, vigilance, APC parameters, predictive calibration and temporary
+dynamic regime can be recovered and distinguished from simpler alternatives
+before any real wrapper-transfer outcomes are inspected.
+
 ## Operating rule
 
 Read all three documents before implementing or launching a new milestone.
