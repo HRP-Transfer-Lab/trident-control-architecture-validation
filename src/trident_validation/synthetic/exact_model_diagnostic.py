@@ -817,6 +817,7 @@ def make_exact_model_world(
     max_windows_per_session: int,
     technical_missingness_rate: float = 0.0,
     exact_signal_scale: float = 1.0,
+    include_observation_noise: bool = True,
 ) -> pd.DataFrame:
     if exact_world_id not in EXACT_MODEL_WORLD_IDS:
         raise ValueError(f"unsupported exact world: {exact_world_id}")
@@ -842,6 +843,7 @@ def make_exact_model_world(
                         exact_world_id,
                         rng,
                         exact_signal_scale=exact_signal_scale,
+                        include_observation_noise=include_observation_noise,
                     )
                     row = _canonical_minimal_row(
                         exact_world_id=exact_world_id,
@@ -869,6 +871,7 @@ def make_m2_self_check_world(
     sessions_per_participant: int,
     min_windows_per_session: int,
     max_windows_per_session: int,
+    include_observation_noise: bool = True,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Generate canonical rows from a known M2 likelihood in raw feature units."""
 
@@ -898,7 +901,12 @@ def make_m2_self_check_world(
                     task_id = tasks[(source_index + participant_index + session_number + window_number) % len(tasks)]
                     z = float(rng.normal())
                     basis = np.array([1.0, z, z**2 - 1.0])
-                    standardised = basis @ coefficients + rng.normal(0.0, residual_sd, size=5)
+                    observation_noise = (
+                        rng.normal(0.0, residual_sd, size=5)
+                        if include_observation_noise
+                        else np.zeros(5, dtype=float)
+                    )
+                    standardised = basis @ coefficients + observation_noise
                     raw = raw_base + standardised * raw_scale
                     rows.append(
                         _canonical_raw_row(
@@ -1536,12 +1544,14 @@ def _exact_standardised_features(
     rng: np.random.Generator,
     *,
     exact_signal_scale: float,
+    include_observation_noise: bool = True,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     scale = float(exact_signal_scale)
     if exact_world_id == "EW0_m0_exact":
         z = rng.normal()
         loadings = scale * np.array([0.95, -0.88, 0.90, -0.62, 0.84])
-        x = z * loadings + rng.normal(0.0, 0.32, size=5)
+        noise = rng.normal(0.0, 0.32, size=5) if include_observation_noise else np.zeros(5)
+        x = z * loadings + noise
         return x, {"latent_1": z, "latent_2": 0.0, "readiness": z, "component": None}
     if exact_world_id == "EW1_m1_exact":
         z = rng.normal(size=2)
@@ -1554,7 +1564,8 @@ def _exact_standardised_features(
                 [0.80, -0.48],
             ]
         )
-        x = z @ loadings.T + rng.normal(0.0, 0.28, size=5)
+        noise = rng.normal(0.0, 0.28, size=5) if include_observation_noise else np.zeros(5)
+        x = z @ loadings.T + noise
         return x, {"latent_1": z[0], "latent_2": z[1], "readiness": z[0], "component": None}
     if exact_world_id == "EW2_m2_exact":
         z = rng.normal()
@@ -1566,7 +1577,8 @@ def _exact_standardised_features(
                 [0.72, -0.68, 0.76, 0.50, 0.70],
             ]
         )
-        x = basis @ coefficients + rng.normal(0.0, 0.18, size=5)
+        noise = rng.normal(0.0, 0.18, size=5) if include_observation_noise else np.zeros(5)
+        x = basis @ coefficients + noise
         return x, {"latent_1": z, "latent_2": 0.0, "readiness": z, "component": None}
     if exact_world_id in {"EW3_m3_exact", "EW4_m4_exact"}:
         if exact_world_id == "EW3_m3_exact":
@@ -1589,7 +1601,8 @@ def _exact_standardised_features(
                 ]
             )
         component = int(rng.choice(len(weights), p=weights))
-        x = means[component] + rng.normal(0.0, 0.20, size=5)
+        noise = rng.normal(0.0, 0.20, size=5) if include_observation_noise else np.zeros(5)
+        x = means[component] + noise
         return x, {
             "latent_1": x[0],
             "latent_2": x[1],

@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Literal, Sequence
 
 import numpy as np
 import pandas as pd
@@ -27,26 +27,66 @@ from trident_validation.provenance import get_git_commit, hash_file, hash_mappin
 from trident_validation.schema import STRUCTURAL_FEATURES_BY_FLAG, validate_window_schema
 from trident_validation.splits import participant_train_test_split
 from trident_validation.synthetic.fixtures import CORE_SYNTHETIC_FEATURES
+from trident_validation.synthetic.exact_model_diagnostic import (
+    make_exact_model_world,
+    make_m2_self_check_world,
+)
 from trident_validation.synthetic.recovery import (
     PRIMARY_METRIC,
     assert_no_ground_truth_columns,
     strip_ground_truth_columns,
 )
 from trident_validation.synthetic.selection_v2 import select_preferred_model_v2
-from trident_validation.synthetic.worlds import (
-    STATIC_SYNTHETIC_WORLD_IDS,
-    WORLD_MODEL_ALIGNMENT,
-    StaticWorldId,
-    make_static_synthetic_world,
-)
 
 
 EMPIRICAL_TWIN_V1_ID = "empirical_twin_v1"
 EMPIRICAL_BACKGROUND_CONTRACT_ID = "EMPIRICAL_BACKGROUND_CONTRACT_V1"
+EMPIRICAL_BACKGROUND_CONTRACT_SHA = "1e9c11e030dc0706c8941dfc08489bb6f63cac5d"
+STATIC_MODEL_SELECTION_CONTRACT_V2_SHA = "81d22f2"
 DEFAULT_CONFIG_PATH = Path("config/empirical_twin_v1.yaml")
 DEFAULT_OUTPUT_DIR = Path("reports/generated/empirical_twin_v1_smoke")
 FEATURES = tuple(CORE_SYNTHETIC_FEATURES)
-PAIRED_FEATURE_ALIASES = {"median_rt_ms": "mean_rt_ms"}
+SOURCE_TASK_SHIFT_RULE = "template_mean_minus_full_acdc_feature_mean"
+TRIAL_COUNT_IMPLEMENTATION_STATUS = "truncated_normal_from_mean_sd_p10_p90_approximation"
+SESSION_CALIBRATION_RULE = "raw_session_covariance_scaled_by_m_over_m_minus_1_before_participant_centring"
+WINDOW_CALIBRATION_RULE = "diagonal_ar_innovation_scaled_to_centred_window_variance_after_fatigue"
+LAG1_CALIBRATION_RULE = "internal_ar_parameter_recorded_separately_from_frozen_short_sequence_estimand"
+M2_7_EMPIRICAL_TWIN_REGISTRY_VERSION = "m2_7_empirical_twin_world_registry_v1"
+
+EmpiricalTwinWorldId = Literal["ETW0", "ETW1", "ETW2", "ETW3", "ETW4"]
+
+M2_7_EMPIRICAL_TWIN_WORLD_REGISTRY: dict[str, dict[str, str]] = {
+    "ETW0": {
+        "description": "M0 probabilistic general performance",
+        "aligned_model_id": "M0_probabilistic_general_performance",
+        "structural_source": "EW0_m0_exact noise-free structural expectation",
+        "exact_world_id": "EW0_m0_exact",
+    },
+    "ETW1": {
+        "description": "M1 continuous manifold",
+        "aligned_model_id": "M1_continuous_control_manifold",
+        "structural_source": "EW1_m1_exact noise-free structural expectation",
+        "exact_world_id": "EW1_m1_exact",
+    },
+    "ETW2": {
+        "description": "M2_EM_v1-aligned nonlinear continuous world",
+        "aligned_model_id": "M2_EM_v1",
+        "structural_source": "M2 self-check latent quadratic curve used for M2_EM repair diagnostics, noise-free expectation",
+        "exact_world_id": "M2_self_check",
+    },
+    "ETW3": {
+        "description": "M3 three-component mixture",
+        "aligned_model_id": "M3_three_profile_mixture",
+        "structural_source": "EW3_m3_exact noise-free structural expectation",
+        "exact_world_id": "EW3_m3_exact",
+    },
+    "ETW4": {
+        "description": "M4 four-component mixture",
+        "aligned_model_id": "M4_four_pace_profile_mixture",
+        "structural_source": "EW4_m4_exact noise-free structural expectation",
+        "exact_world_id": "EW4_m4_exact",
+    },
+}
 
 
 @dataclass(frozen=True)
@@ -105,7 +145,7 @@ def run_empirical_twin_v1_smoke(
     replicates = int(generator_config["replicates_per_world"])
     runs: list[EmpiricalTwinRun] = []
     for world_id in worlds:
-        if world_id not in STATIC_SYNTHETIC_WORLD_IDS:
+        if world_id not in M2_7_EMPIRICAL_TWIN_WORLD_REGISTRY:
             raise ValueError(f"unsupported empirical-twin world: {world_id}")
         for replicate_index in range(replicates):
             print(
@@ -117,7 +157,7 @@ def run_empirical_twin_v1_smoke(
                     world_id=world_id,  # type: ignore[arg-type]
                     replicate_index=replicate_index,
                     background=background,
-                    config=generator_config,
+                    config={**generator_config, "capture_component_audit": True},
                 )
             )
 
@@ -187,7 +227,7 @@ def run_empirical_twin_v1_audit_diagnostics(
     generator_config = dict(config["generator"])
     runs: list[EmpiricalTwinRun] = []
     for world_id in tuple(str(world) for world in generator_config["worlds"]):
-        if world_id not in STATIC_SYNTHETIC_WORLD_IDS:
+        if world_id not in M2_7_EMPIRICAL_TWIN_WORLD_REGISTRY:
             raise ValueError(f"unsupported empirical-twin world: {world_id}")
         for replicate_index in range(int(generator_config["replicates_per_world"])):
             print(
@@ -245,38 +285,125 @@ def load_background_spec(acdc_dir: str | Path, paired_dir: str | Path) -> Backgr
     )
 
 
+def _seed_schedule(
+    master_seed: object,
+    world_id: str,
+    replicate_index: int,
+    *,
+    structural_seed_override: object | None = None,
+) -> dict[str, int]:
+    master = int(master_seed)
+    return {
+        "master_seed": master,
+        "structural_seed": (
+            int(structural_seed_override)
+            if structural_seed_override is not None
+            else _child_seed(master, world_id, replicate_index, "structural")
+        ),
+        "background_seed": _child_seed(master, world_id, replicate_index, "background"),
+        "missingness_seed": _child_seed(master, world_id, replicate_index, "missingness"),
+        "trial_count_seed": _child_seed(master, world_id, replicate_index, "trial_count"),
+    }
+
+
+def _make_m2_7_structural_world(
+    world_id: EmpiricalTwinWorldId,
+    *,
+    seed: int,
+    n_datasets: int,
+    participants_per_dataset: int,
+    sessions_per_participant: int,
+    min_windows_per_session: int,
+    max_windows_per_session: int,
+) -> pd.DataFrame:
+    """Return pure known structural signal for an M2.7 ETW world.
+
+    Historical exact-world defaults are left unchanged. M2.7 asks for the
+    noise-free structural expectation before empirical nuisance is added.
+    """
+
+    if world_id not in M2_7_EMPIRICAL_TWIN_WORLD_REGISTRY:
+        raise ValueError(f"unsupported empirical-twin world: {world_id}")
+    spec = M2_7_EMPIRICAL_TWIN_WORLD_REGISTRY[world_id]
+    if world_id == "ETW2":
+        frame, _oracle = make_m2_self_check_world(
+            seed=seed,
+            n_datasets=n_datasets,
+            participants_per_dataset=participants_per_dataset,
+            sessions_per_participant=sessions_per_participant,
+            min_windows_per_session=min_windows_per_session,
+            max_windows_per_session=max_windows_per_session,
+            include_observation_noise=False,
+        )
+    else:
+        frame = make_exact_model_world(
+            spec["exact_world_id"],  # type: ignore[arg-type]
+            seed=seed,
+            n_datasets=n_datasets,
+            participants_per_dataset=participants_per_dataset,
+            sessions_per_participant=sessions_per_participant,
+            min_windows_per_session=min_windows_per_session,
+            max_windows_per_session=max_windows_per_session,
+            technical_missingness_rate=0.0,
+            include_observation_noise=False,
+        )
+    frame = frame.copy()
+    frame["synthetic_world_id"] = world_id
+    frame["synthetic_empirical_twin_world_id"] = world_id
+    frame["synthetic_aligned_model_id"] = spec["aligned_model_id"]
+    frame["synthetic_structural_source"] = spec["structural_source"]
+    return frame
+
+
 def generate_empirical_twin_dataset(
     *,
-    world_id: StaticWorldId,
+    world_id: EmpiricalTwinWorldId,
     replicate_index: int,
     background: BackgroundSpec,
     config: dict[str, Any],
 ) -> EmpiricalTwinRun:
     """Generate one known-truth empirical twin with nuisance background."""
 
-    seed = _child_seed(config["seed"], world_id, replicate_index, "dataset")
-    rng = np.random.default_rng(seed)
-    templates = _select_templates(background.template_summary, int(config["n_templates"]))
-    base = make_static_synthetic_world(
+    seed_schedule = _seed_schedule(
+        config["seed"],
         world_id,
-        seed=seed,
+        replicate_index,
+        structural_seed_override=config.get("structural_seed_override"),
+    )
+    background_rng = np.random.default_rng(seed_schedule["background_seed"])
+    missingness_rng = np.random.default_rng(seed_schedule["missingness_seed"])
+    trial_count_rng = np.random.default_rng(seed_schedule["trial_count_seed"])
+    templates = _select_templates(background.template_summary, int(config["n_templates"]))
+    base = _make_m2_7_structural_world(
+        world_id,
+        seed=seed_schedule["structural_seed"],
         n_datasets=int(config["n_templates"]),
         participants_per_dataset=int(config["participants_per_template"]),
         sessions_per_participant=int(config["sessions_per_participant"]),
         min_windows_per_session=int(config["windows_per_session"]),
         max_windows_per_session=int(config["windows_per_session"]),
-        technical_missingness_rate=0.0,
     )
     base["synthetic_replicate_index"] = int(replicate_index)
+    for feature in FEATURES:
+        base[f"synthetic_structural_{feature}"] = pd.to_numeric(base[feature], errors="coerce")
     base_sources = sorted(base["source_dataset"].astype(str).unique())
     template_by_source = {
         source: templates.iloc[index % templates.shape[0]]
         for index, source in enumerate(base_sources)
     }
 
-    for source, template in template_by_source.items():
+    for source_number, (source, template) in enumerate(template_by_source.items(), start=1):
         mask = base["source_dataset"].astype(str) == source
+        participant_map = {
+            old_id: f"{world_id}_src{source_number:02d}_p{index:03d}"
+            for index, old_id in enumerate(
+                sorted(base.loc[mask, "participant_id"].astype(str).unique())
+            )
+        }
         base.loc[mask, "source_dataset"] = str(template["source_dataset"])
+        base.loc[mask, "participant_id"] = (
+            base.loc[mask, "participant_id"].astype(str).map(participant_map)
+        )
         base.loc[mask, "task_id"] = str(template["task_id"])
         base.loc[mask, "source_version"] = "empirical_twin_v1_smoke"
         base.loc[mask, "source_file_or_table"] = "synthetic.empirical_twin_v1"
@@ -288,83 +415,113 @@ def generate_empirical_twin_dataset(
     generated = base.copy()
     support_rows: list[dict[str, Any]] = []
     component_rows: list[dict[str, Any]] = []
-    structural_fraction = float(config.get("structural_signal_fraction", 0.35))
     use_covariance = bool(config.get("use_covariance", True))
     session_trend = str(config.get("session_order_context_trend", "off")).lower() == "on"
     if session_trend:
-        support_rows.append(
-            _support_row(
-                world_id,
-                replicate_index,
-                "session_order_context_trend",
-                "sensitivity_enabled",
-                "not_primary_generator_mode",
-            )
-        )
+        raise ValueError("primary empirical_twin_v1 generation requires session_order_context_trend: off")
 
     for source, source_frame in generated.groupby("source_dataset", sort=False):
         template = _template_for_generated_source(templates, source)
         task = str(template["task_id"])
         source_index = source_frame.index
-        means = _template_means(template)
-        between_cov, between_mode = _covariance_matrix(
+        shifts = _centred_source_task_shifts(background, template)
+        support_rows.extend(
+            _template_support_rows(
+                world_id,
+                replicate_index,
+                background=background,
+                template=template,
+                features=FEATURES,
+            )
+        )
+        between_cov, _between_mode, between_support = _acdc_covariance_matrix(
             background.acdc_cov_between,
+            background=background,
             source=str(source),
             task=task,
             features=FEATURES,
             use_covariance=use_covariance,
+            level="between_person",
         )
-        window_cov, window_mode = _covariance_matrix(
+        window_cov, _window_mode, window_support = _acdc_covariance_matrix(
             background.acdc_cov_window,
+            background=background,
             source=str(source),
             task=task,
             features=FEATURES,
             use_covariance=use_covariance,
+            level="within_session",
         )
-        session_cov, session_mode = _paired_session_covariance(
+        session_cov, _session_mode, session_support = _paired_session_covariance(
             background,
             task=task,
             features=FEATURES,
             use_covariance=use_covariance,
+            sessions_per_participant=int(config["sessions_per_participant"]),
         )
-        lag1 = _feature_lookup(
+        lag1, lag1_support = _eligible_feature_lookup(
             background.acdc_temporal,
+            background=background,
             source=str(source),
             task=task,
             column="lag1_mean_autocorrelation",
             default=0.0,
             status_column="lag1_support_status",
+            quantity="lag1_autocorrelation",
         )
-        fatigue = _feature_lookup(
+        fatigue, fatigue_support = _eligible_feature_lookup(
             background.acdc_temporal,
+            background=background,
             source=str(source),
             task=task,
             column="fatigue_mean_slope",
             default=0.0,
             status_column="fatigue_support_status",
+            quantity="within_session_time_on_task_trend",
         )
-        missingness = _feature_lookup(
+        missingness, missing_support = _eligible_feature_lookup(
             background.acdc_missingness,
+            background=background,
             source=str(source),
             task=task,
             column="missing_rate",
             default=0.0,
+            quantity="missingness_rate",
+        )
+        window_cov = _calibrate_window_covariance_for_estimand(
+            window_cov,
+            lag1=lag1,
+            fatigue=fatigue,
+            windows_per_session=int(config["windows_per_session"]),
         )
         trial_counts = _trial_count_targets(template)
 
         support_rows.extend(
-            [
-                _support_row(world_id, replicate_index, "between_covariance", between_mode, str(source)),
-                _support_row(world_id, replicate_index, "window_covariance", window_mode, str(source)),
-                _support_row(world_id, replicate_index, "session_covariance", session_mode, task),
-            ]
+            _stamp_support_rows(between_support, world_id, replicate_index)
+            + _stamp_support_rows(window_support, world_id, replicate_index)
+            + _stamp_support_rows(session_support, world_id, replicate_index)
+            + _stamp_support_rows(lag1_support, world_id, replicate_index)
+            + _stamp_support_rows(fatigue_support, world_id, replicate_index)
+            + _stamp_support_rows(missing_support, world_id, replicate_index)
+        )
+        support_rows.append(
+            _support_row(
+                world_id,
+                replicate_index,
+                "trial_count_distribution",
+                "implementation_approximation",
+                TRIAL_COUNT_IMPLEMENTATION_STATUS,
+                source_dataset=str(source),
+                task_id=task,
+                fallback_type="truncated_normal_from_summary_quantiles",
+            )
         )
         _apply_background_to_source(
             generated,
             source_index=source_index,
             world_id=world_id,
             replicate_index=replicate_index,
-            means=means,
+            shifts=shifts,
             between_cov=between_cov,
             session_cov=session_cov,
             window_cov=window_cov,
@@ -372,8 +529,9 @@ def generate_empirical_twin_dataset(
             fatigue=fatigue if session_trend is False else fatigue,
             missingness=missingness,
             trial_counts=trial_counts,
-            structural_signal_fraction=structural_fraction,
-            rng=rng,
+            background_rng=background_rng,
+            missingness_rng=missingness_rng,
+            trial_count_rng=trial_count_rng,
             component_rows=component_rows
             if bool(config.get("capture_component_audit", False))
             else None,
@@ -381,7 +539,12 @@ def generate_empirical_twin_dataset(
 
     generated = _finalise_generated_bounds(generated)
     validate_window_schema(strip_ground_truth_columns(generated))
-    run_id = _run_id(EMPIRICAL_TWIN_V1_ID, world_id, replicate_index, seed)
+    run_id = _run_id(
+        EMPIRICAL_TWIN_V1_ID,
+        world_id,
+        replicate_index,
+        seed_schedule["master_seed"],
+    )
     audit = build_generator_audit(
         generated,
         background=background,
@@ -392,9 +555,9 @@ def generate_empirical_twin_dataset(
     summary = {
         "run_id": run_id,
         "world_id": world_id,
-        "aligned_model_id": WORLD_MODEL_ALIGNMENT[world_id],
+        "aligned_model_id": M2_7_EMPIRICAL_TWIN_WORLD_REGISTRY[world_id]["aligned_model_id"],
         "replicate_index": int(replicate_index),
-        "dataset_seed": int(seed),
+        **seed_schedule,
         "n_rows": int(generated.shape[0]),
         "n_participants": int(
             generated.loc[:, ["source_dataset", "participant_id"]].drop_duplicates().shape[0]
@@ -407,6 +570,12 @@ def generate_empirical_twin_dataset(
         "n_sources": int(generated["source_dataset"].nunique()),
         "n_tasks": int(generated["task_id"].nunique()),
         "session_order_context_trend": "off",
+        "paired_cross_task_session_covariance": "off",
+        "source_task_shift_rule": SOURCE_TASK_SHIFT_RULE,
+        "session_calibration_rule": SESSION_CALIBRATION_RULE,
+        "window_calibration_rule": WINDOW_CALIBRATION_RULE,
+        "lag1_calibration_rule": LAG1_CALIBRATION_RULE,
+        "trial_count_implementation_status": TRIAL_COUNT_IMPLEMENTATION_STATUS,
         "formal_claims_allowed": False,
         "model_recovery_claim_allowed": False,
     }
@@ -459,7 +628,9 @@ def run_static_tournament_v2_smoke(
             "run_id": run.run_id,
             "world_id": run.world_id,
             "replicate_index": run.replicate_index,
-            "aligned_model_id": WORLD_MODEL_ALIGNMENT[run.world_id],
+            "aligned_model_id": M2_7_EMPIRICAL_TWIN_WORLD_REGISTRY[run.world_id][
+                "aligned_model_id"
+            ],
             "model_id": model_id,
             "selected_model_id": selection.selected_model_id,
             "numerical_best_model_id": selection.numerical_best_model_id,
@@ -519,16 +690,24 @@ def build_generator_audit(
         if frame.empty:
             continue
         for feature in FEATURES:
+            structural_column = f"synthetic_structural_{feature}"
+            target_shift = _centred_source_task_shifts(background, template)[feature]
+            realised_shift = (
+                _as_float(frame[feature].mean(skipna=True))
+                - _as_float(frame[structural_column].mean(skipna=True), default=0.0)
+                if structural_column in frame
+                else float("nan")
+            )
             rows.append(
                 _audit_row(
                     world_id,
                     replicate_index,
                     source,
                     task,
-                    "source_task_mean",
+                    "source_task_shift",
                     feature,
-                    _as_float(template.get(f"{feature}_mean")),
-                    _as_float(frame[feature].mean(skipna=True)),
+                    target_shift,
+                    realised_shift,
                 )
             )
             rows.append(
@@ -772,15 +951,21 @@ def lag1_sequence_diagnostics(
                     if sequence_lengths
                     else float("nan"),
                     "sequence_length_max": max(sequence_lengths) if sequence_lengths else 0,
+                    "proportion_sequences_length_3": (
+                        float(np.mean([length == 3 for length in sequence_lengths]))
+                        if sequence_lengths
+                        else float("nan")
+                    ),
                     "existing_per_sequence_pearson_mean": existing_realised,
                     "diagnostic_pooled_observed_adjacent_pair_corr": pooled_observed,
                     "diagnostic_pooled_window_residual_adjacent_pair_corr": pooled_window_residual,
                     "diagnostic_pooled_ar_component_adjacent_pair_corr": pooled_ar,
                     "diagnostic_pooled_background_component_adjacent_pair_corr": pooled_background,
+                    "all_three_window_cell": all(length == 3 for length in sequence_lengths),
                     "three_window_degeneracy": all(length == 3 for length in sequence_lengths),
                     "diagnostic_note": (
                         "per-sequence Pearson lag-1 is degenerate for three-window "
-                        "sequences; pooled adjacent-pair values are diagnostic only"
+                        "sequences; pooled adjacent-pair values are DIAGNOSTIC ONLY"
                     ),
                 }
             )
@@ -800,7 +985,7 @@ def scale_normalised_diagnostics(
     for _, audit in existing_audit.iterrows():
         parameter = str(audit["parameter"])
         if parameter not in {
-            "source_task_mean",
+            "source_task_shift",
             "between_person_variance",
             "session_within_person_variance",
             "window_within_session_variance",
@@ -826,7 +1011,7 @@ def scale_normalised_diagnostics(
             "variance_ratio_combined_observed": _safe_fraction(realised, target),
             "diagnostic_scope": "combined_observed_includes_known_structural_signal",
         }
-        if parameter == "source_task_mean":
+        if parameter == "source_task_shift":
             row["mean_delta_in_feature_sd"] = (
                 (realised - target) / template_sd
                 if np.isfinite(realised) and np.isfinite(target) and template_sd > 0
@@ -950,8 +1135,17 @@ def classify_audit_diagnostics(
         if not lag_valid.empty
         else float("nan")
     )
-    three_window_rate = float(lag1["three_window_degeneracy"].mean()) if not lag1.empty else float("nan")
-    mean_rows = scale[scale["parameter"] == "source_task_mean"].copy()
+    all_three_cell_rate = (
+        float(lag1["all_three_window_cell"].mean())
+        if "all_three_window_cell" in lag1 and not lag1.empty
+        else float("nan")
+    )
+    proportion_sequences_length_3 = (
+        float(lag1["proportion_sequences_length_3"].mean())
+        if "proportion_sequences_length_3" in lag1 and not lag1.empty
+        else float("nan")
+    )
+    mean_rows = scale[scale["parameter"] == "source_task_shift"].copy()
     median_abs_mean_z = (
         float(mean_rows["mean_delta_in_feature_sd"].abs().median())
         if not mean_rows.empty
@@ -976,7 +1170,7 @@ def classify_audit_diagnostics(
         float(window_rows["component_ratio"].median()) if not window_rows.empty else float("nan")
     )
     classification = []
-    if three_window_rate >= 0.95 and per_sequence_median_delta > residual_median_delta:
+    if all_three_cell_rate >= 0.95 and per_sequence_median_delta > residual_median_delta:
         classification.append(
             "lag1_discrepancy: audit-estimator limitation (b); all generated sequences "
             "are effectively length 3, making per-sequence Pearson lag-1 unstable/degenerate."
@@ -992,7 +1186,7 @@ def classify_audit_diagnostics(
             "remaining disagreement is compatible with estimator limitation and finite-smoke noise (b/c)."
         )
     classification.append(
-        "source_task_means: centred-shift diagnostic median absolute delta "
+        "source_task_shifts: centred-shift diagnostic median absolute delta "
         f"{median_abs_mean_z:.3f} feature SD; classify as finite-smoke noise (c) unless reviewed otherwise."
     )
     classification.append(
@@ -1026,7 +1220,8 @@ def classify_audit_diagnostics(
             "",
             "## Lag-1 Summary",
             "",
-            f"three_window_sequence_rate: {three_window_rate:.3f}",
+            f"all_three_window_cell_rate: {all_three_cell_rate:.3f}",
+            f"proportion_sequences_length_3: {proportion_sequences_length_3:.3f}",
             f"median_abs_delta_existing_per_sequence_estimator: {per_sequence_median_delta:.3f}",
             f"median_abs_delta_pooled_window_residual_estimator: {residual_median_delta:.3f}",
             "",
@@ -1061,6 +1256,16 @@ def write_empirical_twin_v1_outputs(
     support = pd.concat([run.support_audit for run in runs], ignore_index=True)
     support_path = output_dir / "empirical_twin_v1_support_audit.csv"
     support.to_csv(support_path, index=False)
+    component = pd.concat(
+        [
+            run.component_audit
+            for run in runs
+            if run.component_audit is not None and not run.component_audit.empty
+        ],
+        ignore_index=True,
+    )
+    component_path = output_dir / "empirical_twin_v1_component_audit.csv"
+    component.to_csv(component_path, index=False)
     summary = pd.DataFrame([run.generation_summary for run in runs])
     summary_path = output_dir / "empirical_twin_v1_generation_summary.csv"
     summary.to_csv(summary_path, index=False)
@@ -1071,12 +1276,20 @@ def write_empirical_twin_v1_outputs(
     manifest = {
         "study_id": str(config["study"]["id"]),
         "generator_id": EMPIRICAL_TWIN_V1_ID,
+        "generator_version": "empirical_twin_v1_contract_hardened",
         "timestamp_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "empirical_background_contract": EMPIRICAL_BACKGROUND_CONTRACT_ID,
         "empirical_background_contract_commit": str(
             config["contract"]["empirical_background_contract_commit"]
         ),
+        "empirical_background_contract_sha": EMPIRICAL_BACKGROUND_CONTRACT_SHA,
         "static_tournament_contract": STATIC_TOURNAMENT_V2_CONTRACT.to_dict(),
+        "static_tournament_contract_commit": str(
+            config["contract"].get(
+                "static_tournament_contract_commit",
+                STATIC_MODEL_SELECTION_CONTRACT_V2_SHA,
+            )
+        ),
         "session_order_context_trend": _switch_label(
             config["contract"]["session_order_context_trend"]
         ),
@@ -1089,6 +1302,25 @@ def write_empirical_twin_v1_outputs(
         "config_path": str(config_path),
         "config_hash": hash_file(config_path),
         "config_content_hash": hash_mapping(config),
+        "acdc_aggregate_input_dir": str(config["inputs"]["acdc_preflight_dir"]),
+        "paired_aggregate_input_dir": str(config["inputs"]["paired_preflight_dir"]),
+        "acdc_aggregate_checksum": _directory_checksum(Path(config["inputs"]["acdc_preflight_dir"])),
+        "paired_aggregate_checksum": _directory_checksum(Path(config["inputs"]["paired_preflight_dir"])),
+        "support_eligibility_hash": _dataframe_hash(support),
+        "structural_world_registry_version": M2_7_EMPIRICAL_TWIN_REGISTRY_VERSION,
+        "structural_world_registry": M2_7_EMPIRICAL_TWIN_WORLD_REGISTRY,
+        "seed_schedule": summary.to_dict(orient="records"),
+        "source_task_shift_rule": SOURCE_TASK_SHIFT_RULE,
+        "session_calibration_rule": SESSION_CALIBRATION_RULE,
+        "window_calibration_rule": WINDOW_CALIBRATION_RULE,
+        "lag1_calibration_rule": LAG1_CALIBRATION_RULE,
+        "trial_count_implementation_status": TRIAL_COUNT_IMPLEMENTATION_STATUS,
+        "unsupported_quantities": support[support["support_status"] == "unsupported"].to_dict(
+            orient="records"
+        ),
+        "fallback_quantities": support[
+            support["fallback_type"].astype(str).str.len() > 0
+        ].to_dict(orient="records"),
         "n_generated_runs": len(runs),
         "n_generated_rows": int(generated.shape[0]),
         "generated_truth_columns": [
@@ -1098,9 +1330,19 @@ def write_empirical_twin_v1_outputs(
             "generated_windows": str(generated_path),
             "generator_audit": str(audit_path),
             "support_audit": str(support_path),
+            "component_audit": str(component_path),
             "generation_summary": str(summary_path),
             "tournament_smoke_model_scores": str(tournament_path),
             "tournament_smoke_split_audit": str(split_path),
+        },
+        "output_checksums": {
+            "generated_windows": hash_file(generated_path),
+            "generator_audit": hash_file(audit_path),
+            "support_audit": hash_file(support_path),
+            "component_audit": hash_file(component_path),
+            "generation_summary": hash_file(summary_path),
+            "tournament_smoke_model_scores": hash_file(tournament_path),
+            "tournament_smoke_split_audit": hash_file(split_path),
         },
     }
     manifest_path = output_dir / "empirical_twin_v1_manifest.json"
@@ -1111,6 +1353,7 @@ def write_empirical_twin_v1_outputs(
         "generated_windows": generated_path,
         "generator_audit": audit_path,
         "support_audit": support_path,
+        "component_audit": component_path,
         "generation_summary": summary_path,
         "tournament_smoke_model_scores": tournament_path,
         "tournament_smoke_split_audit": split_path,
@@ -1175,7 +1418,7 @@ def _apply_background_to_source(
     source_index: pd.Index,
     world_id: str,
     replicate_index: int,
-    means: dict[str, float],
+    shifts: dict[str, float],
     between_cov: np.ndarray,
     session_cov: np.ndarray,
     window_cov: np.ndarray,
@@ -1183,28 +1426,31 @@ def _apply_background_to_source(
     fatigue: dict[str, float],
     missingness: dict[str, float],
     trial_counts: dict[str, float],
-    structural_signal_fraction: float,
-    rng: np.random.Generator,
+    background_rng: np.random.Generator,
+    missingness_rng: np.random.Generator,
+    trial_count_rng: np.random.Generator,
     component_rows: list[dict[str, Any]] | None = None,
 ) -> None:
     source_frame = frame.loc[source_index].copy()
-    feature_matrix = source_frame.loc[:, list(FEATURES)].astype(float)
-    standardised = (feature_matrix - feature_matrix.mean()) / feature_matrix.std(ddof=0).replace(0, 1)
-    total_sd = np.sqrt(
-        np.maximum(np.diag(between_cov) + np.diag(session_cov) + np.diag(window_cov), 1e-9)
-    )
-    structural = standardised.to_numpy(dtype=float) * total_sd * structural_signal_fraction
+    structural = source_frame.loc[
+        :,
+        [f"synthetic_structural_{feature}" for feature in FEATURES],
+    ].to_numpy(dtype=float)
     person_effects: dict[tuple[str, str], np.ndarray] = {}
     session_effects: dict[tuple[str, str, str], np.ndarray] = {}
-    mean_vector = np.array([means[feature] for feature in FEATURES], dtype=float)
+    shift_vector = np.array([shifts[feature] for feature in FEATURES], dtype=float)
     values = np.zeros((source_frame.shape[0], len(FEATURES)), dtype=float)
     source_positions = {index: pos for pos, index in enumerate(source_frame.index)}
+    rho = np.array(
+        [np.clip(lag1.get(feature, 0.0), -0.8, 0.8) for feature in FEATURES],
+        dtype=float,
+    )
 
     for participant_key, participant_group in source_frame.groupby(
         ["source_dataset", "participant_id"],
         sort=False,
     ):
-        person_effects[participant_key] = rng.multivariate_normal(
+        person_effects[participant_key] = background_rng.multivariate_normal(
             np.zeros(len(FEATURES)),
             between_cov,
         )
@@ -1212,18 +1458,14 @@ def _apply_background_to_source(
             ["source_dataset", "participant_id", "session_id"],
             sort=False,
         ):
-            session_effects[session_key] = rng.multivariate_normal(
+            session_effects[session_key] = background_rng.multivariate_normal(
                 np.zeros(len(FEATURES)),
                 session_cov,
             )
             ar_state = np.zeros(len(FEATURES), dtype=float)
             ordered = session_group.sort_values("window_start_trial")
             for window_number, (row_index, row) in enumerate(ordered.iterrows()):
-                innovation = rng.multivariate_normal(np.zeros(len(FEATURES)), window_cov)
-                rho = np.array(
-                    [np.clip(lag1.get(feature, 0.0), -0.8, 0.8) for feature in FEATURES],
-                    dtype=float,
-                )
+                innovation = background_rng.multivariate_normal(np.zeros(len(FEATURES)), window_cov)
                 ar_state = rho * ar_state + innovation
                 fatigue_vector = np.array(
                     [fatigue.get(feature, 0.0) * window_number for feature in FEATURES],
@@ -1231,8 +1473,8 @@ def _apply_background_to_source(
                 )
                 pos = source_positions[row_index]
                 values[pos, :] = (
-                    mean_vector
-                    + structural[pos, :]
+                    structural[pos, :]
+                    + shift_vector
                     + person_effects[participant_key]
                     + session_effects[session_key]
                     + ar_state
@@ -1251,7 +1493,7 @@ def _apply_background_to_source(
                                 "window_id": row["window_id"],
                                 "window_start_trial": row["window_start_trial"],
                                 "feature": feature,
-                                "target_mean": mean_vector[feature_index],
+                                "target_source_task_shift": shift_vector[feature_index],
                                 "structural_component": structural[pos, feature_index],
                                 "person_component": person_effects[participant_key][feature_index],
                                 "session_component": session_effects[session_key][feature_index],
@@ -1270,9 +1512,9 @@ def _apply_background_to_source(
         frame.loc[source_frame.index, feature] = values[:, feature_index]
         miss_rate = float(np.clip(missingness.get(feature, 0.0), 0.0, 0.75))
         if miss_rate > 0:
-            mask = rng.random(source_frame.shape[0]) < miss_rate
+            mask = missingness_rng.random(source_frame.shape[0]) < miss_rate
             frame.loc[source_frame.index[mask], feature] = np.nan
-    counts = rng.normal(
+    counts = trial_count_rng.normal(
         loc=trial_counts["mean"],
         scale=max(trial_counts["sd"], 1.0),
         size=source_frame.shape[0],
@@ -1332,6 +1574,88 @@ def _template_means(template: pd.Series) -> dict[str, float]:
     }
 
 
+def _feature_global_means(background: BackgroundSpec) -> dict[str, float]:
+    rows = background.feature_summary.copy()
+    rows["feature"] = rows["feature"].astype(str)
+    return {
+        feature: _as_float(
+            rows.loc[rows["feature"] == feature, "mean"].iloc[0],
+            default=0.0,
+        )
+        if (rows["feature"] == feature).any()
+        else 0.0
+        for feature in FEATURES
+    }
+
+
+def _centred_source_task_shifts(
+    background: BackgroundSpec,
+    template: pd.Series,
+) -> dict[str, float]:
+    global_means = _feature_global_means(background)
+    return {
+        feature: _as_float(template.get(f"{feature}_mean"), default=global_means[feature])
+        - global_means[feature]
+        for feature in FEATURES
+    }
+
+
+def _template_support_rows(
+    world_id: str,
+    replicate_index: int,
+    *,
+    background: BackgroundSpec,
+    template: pd.Series,
+    features: Sequence[str],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    source = str(template["source_dataset"])
+    task = str(template["task_id"])
+    for feature in features:
+        status, reason = _acdc_template_feature_eligible(template, feature)
+        rows.append(
+            _support_row(
+                world_id,
+                replicate_index,
+                "source_task_shift",
+                status,
+                reason,
+                source_dataset=source,
+                task_id=task,
+                feature=feature,
+                fallback_type="" if status == "estimated" else "disabled_or_neutral",
+            )
+        )
+    return rows
+
+
+def _stamp_support_rows(
+    rows: Sequence[dict[str, Any]],
+    world_id: str,
+    replicate_index: int,
+) -> list[dict[str, Any]]:
+    stamped: list[dict[str, Any]] = []
+    for row in rows:
+        copy = dict(row)
+        copy["world_id"] = str(world_id)
+        copy["replicate_index"] = int(replicate_index)
+        stamped.append(copy)
+    return stamped
+
+
+def _acdc_template_feature_eligible(template: pd.Series, feature: str) -> tuple[str, str]:
+    n_rows = _as_float(template.get("n_rows"), default=0.0)
+    n_participants = _as_float(template.get("n_participants"), default=0.0)
+    coverage = _as_float(template.get(f"{feature}_coverage"), default=0.0)
+    if n_participants < 50:
+        return "unsupported", "template_n_participants_below_50"
+    if n_rows < 100:
+        return "unsupported", "template_n_rows_below_100"
+    if coverage < 0.95:
+        return "unsupported", "template_feature_coverage_below_0_95"
+    return "estimated", "contract_template_thresholds_met"
+
+
 def _trial_count_targets(template: pd.Series) -> dict[str, float]:
     mean = _as_float(template.get("mean_n_trials_valid"), default=50.0)
     sd = _as_float(template.get("sd_n_trials_valid"), default=5.0)
@@ -1343,20 +1667,143 @@ def _trial_count_targets(template: pd.Series) -> dict[str, float]:
     }
 
 
-def _covariance_matrix(
+def _acdc_covariance_matrix(
     covariance: pd.DataFrame,
     *,
+    background: BackgroundSpec,
     source: str,
     task: str,
     features: Sequence[str],
     use_covariance: bool,
-) -> tuple[np.ndarray, str]:
+    level: str,
+) -> tuple[np.ndarray, str, list[dict[str, Any]]]:
     rows = covariance[
         (covariance["source_dataset"].astype(str) == str(source))
         & (covariance["task_id"].astype(str) == str(task))
-        & (covariance["support_status"].astype(str) == "estimated")
+    ].copy()
+    support_rows: list[dict[str, Any]] = []
+    eligible_rows = []
+    quantity = "between_person_covariance" if level == "between_person" else "within_session_covariance"
+    for _, row in rows.iterrows():
+        feature_a = str(row["feature_a"])
+        feature_b = str(row["feature_b"])
+        status, reason = _acdc_covariance_row_eligible(row, level=level)
+        if status == "estimated":
+            eligible_rows.append(row)
+        support_rows.append(
+            _support_row(
+                row.get("synthetic_world_id", ""),
+                0,
+                quantity,
+                status,
+                reason,
+                source_dataset=source,
+                task_id=task,
+                feature=f"{feature_a}|{feature_b}",
+                fallback_type="" if status == "estimated" else "diagonal_variance_or_neutral",
+                fallback_source="ACDC same-template diagonal variance",
+            )
+        )
+    matrix, mode = _matrix_from_covariance_rows(
+        pd.DataFrame(eligible_rows),
+        features,
+        use_covariance=use_covariance,
+    )
+    if np.allclose(matrix, 0.0):
+        diag = []
+        column = (
+            "between_participant_variance"
+            if level == "between_person"
+            else "window_within_session_variance"
+        )
+        for feature in features:
+            value, variance_status, variance_reason = _acdc_variance_target_if_eligible(
+                background.acdc_variance,
+                background=background,
+                source=source,
+                task=task,
+                feature=feature,
+                column=column,
+                quantity=(
+                    "between_person_variance"
+                    if level == "between_person"
+                    else "window_within_session_variance"
+                ),
+            )
+            diag.append(max(value if np.isfinite(value) else 0.0, 0.0))
+            support_rows.append(
+                _support_row(
+                    "",
+                    0,
+                    "between_person_variance"
+                    if level == "between_person"
+                    else "window_within_session_variance",
+                    variance_status,
+                    variance_reason,
+                    source_dataset=source,
+                    task_id=task,
+                    feature=feature,
+                    fallback_type="" if variance_status == "estimated" else "fixed_neutral_value",
+                    fallback_source="" if variance_status == "estimated" else "unsupported_variance",
+                )
+            )
+        matrix = np.diag(diag)
+        mode = f"{level}_diagonal_variance"
+    support_rows.append(
+        _support_row(
+            "",
+            0,
+            quantity,
+            mode,
+            f"{level}_matrix_generation_mode",
+            source_dataset=source,
+            task_id=task,
+        )
+    )
+    return matrix, mode, support_rows
+
+
+def _acdc_variance_target_if_eligible(
+    frame: pd.DataFrame,
+    *,
+    background: BackgroundSpec,
+    source: str,
+    task: str,
+    feature: str,
+    column: str,
+    quantity: str,
+) -> tuple[float, str, str]:
+    rows = frame[
+        (frame["source_dataset"].astype(str) == str(source))
+        & (frame["task_id"].astype(str) == str(task))
+        & (frame["feature"].astype(str) == str(feature))
     ]
-    return _matrix_from_covariance_rows(rows, features, use_covariance=use_covariance)
+    status, reason = _scalar_support_status(
+        rows,
+        background=background,
+        source=source,
+        task=task,
+        feature=feature,
+        quantity=quantity,
+        status_column=None,
+    )
+    if not rows.empty:
+        row = rows.iloc[0]
+        if quantity == "between_person_variance":
+            if str(row.get("between_support_status")) != "estimated":
+                status, reason = "unsupported", str(row.get("support_reason", "extractor_not_estimated"))
+            elif _as_float(row.get("n_participants"), default=0.0) < 30:
+                status, reason = "unsupported", "participants_with_observed_means_below_30"
+        elif quantity == "window_within_session_variance":
+            if str(row.get("window_support_status")) != "estimated":
+                status, reason = "unsupported", str(row.get("support_reason", "extractor_not_estimated"))
+            elif _as_float(row.get("n_sessions_with_repeated_windows"), default=0.0) < 30:
+                status, reason = "unsupported", "sessions_with_repeated_windows_below_30"
+            elif _as_float(row.get("n_observed"), default=0.0) < 100:
+                status, reason = "unsupported", "window_residual_rows_below_100"
+    if status != "estimated" or rows.empty:
+        return 0.0, status, reason
+    return max(_as_float(rows.iloc[0].get(column), default=0.0), 0.0), status, reason
 
 
 def _paired_session_covariance(
@@ -1365,14 +1812,58 @@ def _paired_session_covariance(
     task: str,
     features: Sequence[str],
     use_covariance: bool,
-) -> tuple[np.ndarray, str]:
+    sessions_per_participant: int,
+) -> tuple[np.ndarray, str, list[dict[str, Any]]]:
     rows = background.paired_cov_session[
         (background.paired_cov_session["task_id"].astype(str) == str(task))
-        & (background.paired_cov_session["support_status"].astype(str) == "estimated")
     ].copy()
-    rows["feature_a"] = rows["feature_a"].map(_from_paired_feature_name)
-    rows["feature_b"] = rows["feature_b"].map(_from_paired_feature_name)
-    matrix, mode = _matrix_from_covariance_rows(rows, features, use_covariance=use_covariance)
+    support_rows: list[dict[str, Any]] = []
+    for feature in features:
+        value = _paired_target_variance(background.paired_variance, task, feature)
+        status = "estimated" if value > 0 else "unsupported"
+        reason = (
+            "paired_repeat_participant_exact_feature_thresholds_met"
+            if value > 0
+            else "paired_exact_canonical_feature_missing_or_unsupported"
+        )
+        support_rows.append(
+            _support_row(
+                "",
+                0,
+                "session_within_person_variance",
+                status,
+                reason,
+                task_id=task,
+                feature=feature,
+                fallback_type="" if status == "estimated" else "fixed_neutral_value",
+                fallback_source="" if status == "estimated" else "no_feature_alias_borrowing",
+            )
+        )
+    eligible_rows = []
+    for _, row in rows.iterrows():
+        feature_a = str(row["feature_a"])
+        feature_b = str(row["feature_b"])
+        status, reason = _paired_covariance_row_eligible(row, features=features)
+        if status == "estimated":
+            eligible_rows.append(row)
+        support_rows.append(
+            _support_row(
+                "",
+                0,
+                "session_within_person_covariance",
+                status,
+                reason,
+                task_id=task,
+                feature=f"{feature_a}|{feature_b}",
+                fallback_type="" if status == "estimated" else "diagonal_variance_or_neutral",
+                fallback_source="paired exact-feature diagonal variance",
+            )
+        )
+    matrix, mode = _matrix_from_covariance_rows(
+        pd.DataFrame(eligible_rows),
+        features,
+        use_covariance=use_covariance,
+    )
     if np.allclose(matrix, 0.0):
         diag = [
             max(_paired_target_variance(background.paired_variance, task, feature), 0.0)
@@ -1380,7 +1871,96 @@ def _paired_session_covariance(
         ]
         matrix = np.diag(diag)
         mode = "paired_session_diagonal_variance"
-    return matrix, mode
+    matrix = _calibrate_session_covariance_for_centring(
+        matrix,
+        sessions_per_participant=sessions_per_participant,
+    )
+    support_rows.append(
+        _support_row(
+            "",
+            0,
+            "session_within_person_covariance",
+            mode,
+            SESSION_CALIBRATION_RULE,
+            task_id=task,
+            fallback_type="" if "diagonal" not in mode else "calibrated_diagonal",
+        )
+    )
+    return matrix, mode, support_rows
+
+
+def _acdc_covariance_row_eligible(row: pd.Series, *, level: str) -> tuple[str, str]:
+    if str(row.get("support_status")) != "estimated":
+        return "unsupported", str(row.get("support_reason", "extractor_not_estimated"))
+    n_units = _as_float(row.get("n_units"), default=0.0)
+    if level == "between_person" and n_units < 30:
+        return "unsupported", "complete_participant_means_below_30"
+    if level == "within_session" and n_units < 100:
+        return "unsupported", "complete_within_session_residual_rows_below_100"
+    return "estimated", "contract_covariance_thresholds_met"
+
+
+def _paired_covariance_row_eligible(
+    row: pd.Series,
+    *,
+    features: Sequence[str],
+) -> tuple[str, str]:
+    feature_a = str(row.get("feature_a"))
+    feature_b = str(row.get("feature_b"))
+    if feature_a not in features or feature_b not in features:
+        return "unsupported", "paired_feature_not_exact_canonical_feature"
+    if str(row.get("support_status")) != "estimated":
+        return "unsupported", str(row.get("support_reason", "extractor_not_estimated"))
+    if _as_float(row.get("n_units"), default=0.0) < 30:
+        return "unsupported", "complete_repeat_participant_session_deviation_units_below_30"
+    return "estimated", "paired_session_covariance_thresholds_met"
+
+
+def _calibrate_session_covariance_for_centring(
+    matrix: np.ndarray,
+    *,
+    sessions_per_participant: int,
+) -> np.ndarray:
+    if sessions_per_participant <= 1 or np.allclose(matrix, 0.0):
+        return matrix
+    scaled = matrix * (float(sessions_per_participant) / float(sessions_per_participant - 1))
+    min_eigen = float(np.linalg.eigvalsh((scaled + scaled.T) / 2).min()) if scaled.size else 0.0
+    if min_eigen < -1e-8:
+        return np.diag(np.maximum(np.diag(scaled), 0.0))
+    return scaled
+
+
+def _calibrate_window_covariance_for_estimand(
+    target_cov: np.ndarray,
+    *,
+    lag1: dict[str, float],
+    fatigue: dict[str, float],
+    windows_per_session: int,
+) -> np.ndarray:
+    if windows_per_session < 2 or np.allclose(target_cov, 0.0):
+        return target_cov
+    calibrated = np.zeros_like(target_cov, dtype=float)
+    times = np.arange(windows_per_session, dtype=float)
+    fatigue_sample_variance_factor = float(np.sum((times - times.mean()) ** 2) / (windows_per_session - 1))
+    for index, feature in enumerate(FEATURES):
+        target_variance = max(float(target_cov[index, index]), 0.0)
+        slope = float(fatigue.get(feature, 0.0))
+        fatigue_variance = slope * slope * fatigue_sample_variance_factor
+        residual_target = max(target_variance - fatigue_variance, 0.0)
+        phi = float(np.clip(lag1.get(feature, 0.0), -0.8, 0.8))
+        factor = _centred_ar_sample_variance_factor(phi, windows_per_session)
+        calibrated[index, index] = residual_target / max(factor, 1e-12)
+    return calibrated
+
+
+def _centred_ar_sample_variance_factor(phi: float, length: int) -> float:
+    transition = np.zeros((length, length), dtype=float)
+    for row in range(length):
+        for col in range(row + 1):
+            transition[row, col] = phi ** (row - col)
+    centring = np.eye(length) - np.ones((length, length), dtype=float) / float(length)
+    covariance = centring @ transition @ transition.T @ centring.T
+    return float(np.trace(covariance) / max(length - 1, 1))
 
 
 def _matrix_from_covariance_rows(
@@ -1463,23 +2043,106 @@ def _target_lookup(
     return _as_float(rows.iloc[0][column])
 
 
+def _eligible_feature_lookup(
+    frame: pd.DataFrame,
+    *,
+    background: BackgroundSpec,
+    source: str,
+    task: str,
+    column: str,
+    default: float,
+    quantity: str,
+    status_column: str | None = None,
+) -> tuple[dict[str, float], list[dict[str, Any]]]:
+    values: dict[str, float] = {}
+    rows: list[dict[str, Any]] = []
+    for feature in FEATURES:
+        target_rows = frame[
+            (frame["source_dataset"].astype(str) == str(source))
+            & (frame["task_id"].astype(str) == str(task))
+            & (frame["feature"].astype(str) == str(feature))
+        ]
+        status, reason = _scalar_support_status(
+            target_rows,
+            background=background,
+            source=source,
+            task=task,
+            feature=feature,
+            quantity=quantity,
+            status_column=status_column,
+        )
+        value = (
+            _as_float(target_rows.iloc[0][column], default=default)
+            if status == "estimated" and not target_rows.empty and column in target_rows
+            else default
+        )
+        values[feature] = float(value) if np.isfinite(value) else default
+        rows.append(
+            _support_row(
+                "",
+                0,
+                quantity,
+                status,
+                reason,
+                source_dataset=source,
+                task_id=task,
+                feature=feature,
+                fallback_type="" if status == "estimated" else "fixed_neutral_value",
+                fallback_source="" if status == "estimated" else "contract_authorised_schema_completion",
+            )
+        )
+    return values, rows
+
+
+def _scalar_support_status(
+    rows: pd.DataFrame,
+    *,
+    background: BackgroundSpec,
+    source: str,
+    task: str,
+    feature: str,
+    quantity: str,
+    status_column: str | None,
+) -> tuple[str, str]:
+    template_rows = background.template_summary[
+        (background.template_summary["source_dataset"].astype(str) == str(source))
+        & (background.template_summary["task_id"].astype(str) == str(task))
+    ]
+    if template_rows.empty:
+        return "unsupported", "template_missing"
+    template_status, template_reason = _acdc_template_feature_eligible(template_rows.iloc[0], feature)
+    if template_status != "estimated":
+        return "unsupported", template_reason
+    if rows.empty:
+        return "unsupported", "aggregate_row_missing"
+    row = rows.iloc[0]
+    if status_column and status_column in row and str(row.get(status_column)) != "estimated":
+        return "unsupported", str(row.get(status_column.replace("_status", "_reason"), "extractor_not_estimated"))
+    if quantity == "lag1_autocorrelation":
+        if _as_float(row.get("lag1_usable_sequences"), default=0.0) < 30:
+            return "unsupported", "lag1_usable_sequences_below_30"
+        if _as_float(row.get("lag1_median_sequence_length"), default=0.0) < 3:
+            return "unsupported", "lag1_sequence_length_below_3"
+    elif quantity == "within_session_time_on_task_trend":
+        if _as_float(row.get("fatigue_usable_sessions"), default=0.0) < 30:
+            return "unsupported", "fatigue_usable_sessions_below_30"
+    elif quantity == "missingness_rate":
+        if _as_float(row.get("n_rows"), default=0.0) <= 0:
+            return "unsupported", "missingness_n_rows_zero"
+    return "estimated", "contract_scalar_thresholds_met"
+
+
 def _paired_target_variance(frame: pd.DataFrame, task: str, feature: str) -> float:
-    paired_feature = PAIRED_FEATURE_ALIASES.get(feature, feature)
     rows = frame[
         (frame["task_id"].astype(str) == str(task))
-        & (frame["feature"].astype(str) == paired_feature)
+        & (frame["feature"].astype(str) == str(feature))
         & (frame["session_support_status"].astype(str) == "estimated")
     ]
     if rows.empty:
         return 0.0
+    if _as_float(rows.iloc[0].get("n_repeat_participants"), default=0.0) < 30:
+        return 0.0
     return max(_as_float(rows.iloc[0]["session_within_participant_variance"], default=0.0), 0.0)
-
-
-def _from_paired_feature_name(feature: object) -> str:
-    value = str(feature)
-    if value == "mean_rt_ms":
-        return "median_rt_ms"
-    return value
 
 
 def _finalise_generated_bounds(frame: pd.DataFrame) -> pd.DataFrame:
@@ -1493,11 +2156,17 @@ def _finalise_generated_bounds(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def _reset_task_context_columns(frame: pd.DataFrame) -> None:
+    for columns in STRUCTURAL_FEATURES_BY_FLAG.values():
+        for column in columns:
+            if column not in frame.columns:
+                frame[column] = np.nan
     task = frame["task_id"].astype(str)
     frame["has_conflict_cost"] = task.isin(["Stroop", "Flanker"])
     frame["has_post_error"] = task.isin(["Stroop", "Flanker"])
     frame["has_vigilance"] = task == "SART"
     frame["has_switch_structure"] = False
+    frame["has_confidence"] = False
+    frame["has_change_point"] = False
     frame["congruency_mix"] = np.where(frame["has_conflict_cost"], "balanced", "not_applicable")
     frame["switch_rate"] = np.nan
     frame["lure_rate"] = np.where(frame["has_vigilance"], 0.12, np.nan)
@@ -1703,13 +2372,24 @@ def _support_row(
     quantity: str,
     status: str,
     detail: str,
+    *,
+    source_dataset: str = "",
+    task_id: str = "",
+    feature: str = "",
+    fallback_type: str = "",
+    fallback_source: str = "",
 ) -> dict[str, Any]:
     return {
         "world_id": str(world_id),
         "replicate_index": int(replicate_index),
+        "source_dataset": source_dataset,
+        "task_id": task_id,
+        "feature": feature,
         "quantity": quantity,
         "support_status": status,
         "detail": detail,
+        "fallback_type": fallback_type,
+        "fallback_source": fallback_source,
     }
 
 
@@ -1735,6 +2415,21 @@ def _safe_fraction(numerator: float, denominator: float) -> float:
     return float(numerator / denominator)
 
 
+def _dataframe_hash(frame: pd.DataFrame) -> str:
+    csv = frame.sort_index(axis=1).to_csv(index=False)
+    return "sha256:" + hashlib.sha256(csv.encode("utf-8")).hexdigest()
+
+
+def _directory_checksum(path: Path) -> str:
+    if not path.exists():
+        return "missing"
+    digest = hashlib.sha256()
+    for file_path in sorted(item for item in path.iterdir() if item.is_file()):
+        digest.update(file_path.name.encode("utf-8"))
+        digest.update(hash_file(file_path).encode("utf-8"))
+    return "sha256:" + digest.hexdigest()
+
+
 def _run_id(*parts: object) -> str:
     return hashlib.sha256("|".join(str(part) for part in parts).encode("utf-8")).hexdigest()[:16]
 
@@ -1757,6 +2452,8 @@ def _validate_config(config: dict[str, Any]) -> None:
         raise ValueError("empirical_twin_v1 requires static_tournament_v2")
     if not _is_switch_off(config.get("contract", {}).get("session_order_context_trend")):
         raise ValueError("primary empirical_twin_v1 smoke requires session_order_context_trend: off")
+    if not _is_switch_off(config.get("generator", {}).get("paired_cross_task_session_covariance", "off")):
+        raise ValueError("primary empirical_twin_v1 smoke requires paired_cross_task_session_covariance: off")
 
 
 def _is_switch_off(value: object) -> bool:
