@@ -1,0 +1,41 @@
+study:
+  id: empirical_twin_v1_smoke
+  stage: M2.7_generator_smoke
+  status: smoke_only
+
+contract:
+  empirical_background_contract: EMPIRICAL_BACKGROUND_CONTRACT_V1
+  empirical_background_contract_commit: 1e9c11e
+  static_tournament_contract: static_tournament_v2
+  session_order_context_trend: off
+  formal_claims_allowed: false
+
+inputs:
+  acdc_preflight_dir: reports/generated/empirical_twin_preflight_v1_full_acdc
+  paired_preflight_dir: reports/generated/empirical_twin_preflight_v1_full_acdc_paired_session
+
+generator:
+  seed: 20260809
+  worlds:
+    - W0_general_performance
+    - W1_continuous_manifold
+    - W2_nonlinear_vigilance
+    - W3_three_profile_mixture
+    - W4_four_pace_mixture
+  replicates_per_world: 1
+  n_templates: 3
+  participants_per_template: 8
+  sessions_per_participant: 2
+  windows_per_session: 3
+  structural_signal_fraction: 0.35
+  use_covariance: true
+  paired_cross_task_session_covariance: off
+
+tournament_smoke:
+  enabled: true
+  test_fraction: 0.25
+  practical_equivalence_margin: 0.01
+  paired_ci_z: 1.96
+
+outputs:
+  directory: reports/generated/empirical_twin_v1_smoke
