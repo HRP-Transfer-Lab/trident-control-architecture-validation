@@ -416,6 +416,28 @@ def test_repeated_person_stability_audit_exists():
 
     assert not stability.empty
     assert set(stability["feature"]).issuperset(set(empirical_twin_v1.FEATURES))
+    assert stability["target"].notna().any()
+
+
+def test_repeated_person_stability_requires_dedicated_repeat_only_target():
+    background = empirical_twin_v1.load_background_spec(
+        ROOT / "reports/generated/empirical_twin_preflight_v1_full_acdc",
+        ROOT / "reports/generated/empirical_twin_preflight_v1_full_acdc_paired_session",
+    )
+
+    target = empirical_twin_v1._paired_target_stability(
+        background.paired_stability,
+        "Stroop",
+        "accuracy",
+    )
+    no_dedicated_target = empirical_twin_v1._paired_target_stability(
+        background.paired_stability.iloc[0:0],
+        "Stroop",
+        "accuracy",
+    )
+
+    assert np.isfinite(target)
+    assert np.isnan(no_dedicated_target)
 
 
 def test_acdc_covariance_requires_template_feature_coverage():
