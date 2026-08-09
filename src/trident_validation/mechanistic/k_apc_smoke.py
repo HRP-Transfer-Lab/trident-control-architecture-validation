@@ -2,8 +2,8 @@
 
 This module is engineering scaffolding for the first mechanistic
 identifiability gate. It generates known-truth synthetic data for MECH0 and
-MECH1, strips truth columns before placeholder scoring, and reports audits. It
-does not fit public data and does not authorise Trident-G, APC, PACE, transfer,
+MECH1, strips truth columns before scoring, and reports audits. It does not fit
+public data and does not authorise Trident-G, APC, PACE, transfer,
 neural-criticality or cusp claims.
 """
 
@@ -40,6 +40,7 @@ MECHANISTIC_OBSERVED_FEATURES = (
     "rt_cv",
     "throughput_proxy",
 )
+K_APC_SCORING_CONFIG_PATH = "config/mechanistic_k_apc_scoring_v1.yaml"
 TRUTH_COLUMNS = (
     "synthetic_truth_family_id",
     "synthetic_truth_family_label",
@@ -61,6 +62,20 @@ class KAPCSmokeOutputs:
     split_audit: pd.DataFrame
     report: str
     manifest: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class KAPCScoringContract:
+    """Validated first-gate K/APC scoring contract."""
+
+    registry_id: str
+    feature_columns: tuple[str, ...]
+    candidate_models: tuple[dict[str, Any], ...]
+    primary_metric: str
+    raw_metric: str
+    residual_variance_floor: float
+    practical_equivalence_margin: float
+    config_hash: str
 
 
 def generate_k_apc_unit(schedule_row: pd.Series | dict[str, Any]) -> pd.DataFrame:
@@ -147,6 +162,7 @@ def run_k_apc_smoke(
     config_path: str | Path = "config/mechanistic_identifiability_v1.yaml",
     *,
     output_dir: str | Path = "reports/generated/m2_8_k_apc_smoke",
+    scoring_config_path: str | Path = K_APC_SCORING_CONFIG_PATH,
 ) -> KAPCSmokeOutputs:
     """Run the bounded first-gate M2.8 generator/scoring smoke."""
 
@@ -154,6 +170,7 @@ def run_k_apc_smoke(
     output_dir = Path(output_dir)
     config = load_yaml_config(config_path)
     plan = load_mechanistic_identifiability_plan(config_path)
+    scoring_contract = load_k_apc_scoring_contract(scoring_config_path)
     gate_schedule = plan.schedule[
         (plan.schedule["gate_id"] == K_APC_GATE_ID)
         & plan.schedule["truth_family_id"].isin(K_APC_TRUTH_FAMILIES)
@@ -182,10 +199,10 @@ def run_k_apc_smoke(
             participant_columns=("source_dataset", "participant_id"),
         )
         assert_no_participant_overlap(scoring_frame, split)
-        model_scores = score_capacity_vs_apc_placeholders(
+        model_scores = score_capacity_vs_apc_registered(
             scoring_frame,
             split,
-            feature_columns=MECHANISTIC_OBSERVED_FEATURES,
+            scoring_contract=scoring_contract,
         )
         for model_row in model_scores.to_dict(orient="records"):
             model_rows.append({**_unit_fields(schedule_row), **model_row})
@@ -220,13 +237,13 @@ def run_k_apc_smoke(
         "truth_family_ids": list(K_APC_TRUTH_FAMILIES),
         "config_path": str(config_path.as_posix()),
         "config_hash": hash_mapping(config),
+        "scoring_config_path": str(Path(scoring_config_path).as_posix()),
+        "scoring_config_hash": scoring_contract.config_hash,
+        "scoring_contract_id": scoring_contract.registry_id,
         "schedule_hash": plan.schedule_hash,
         "n_units": int(gate_schedule.shape[0]),
         "n_rows": int(total_generated_rows),
-        "placeholder_models": [
-            "SCORE0_capacity_only_rank1",
-            "SCORE1_static_continuous_apc_rank5",
-        ],
+        "candidate_models": [record["id"] for record in scoring_contract.candidate_models],
         "model_winner_interpretation_allowed": False,
     }
     _atomic_write_csv(output_dir / "generation_audit.csv", generation_audit)
@@ -249,31 +266,116 @@ def run_k_apc_smoke(
     )
 
 
-def score_capacity_vs_apc_placeholders(
+def load_k_apc_scoring_contract(path: str | Path = K_APC_SCORING_CONFIG_PATH) -> KAPCScoringContract:
+    """Load and validate the registered first-gate scoring contract."""
+
+    config = load_yaml_config(path)
+    registry = _required_mapping(config, "registry")
+    scope = _required_mapping(config, "scope")
+    rule = _required_mapping(config, "scoring_rule")
+    feature_columns = config.get("feature_columns")
+    candidate_models = config.get("candidate_models")
+    if registry.get("id") != "mechanistic_k_apc_scoring_v1":
+        raise ConfigValidationError("K/APC scoring registry id is invalid")
+    for field in (
+        "formal_claims_allowed",
+        "real_transfer_outcomes_allowed",
+        "trident_validation_claim_allowed",
+        "pace_claim_allowed",
+        "dynamic_regime_claim_allowed",
+        "neural_criticality_claim_allowed",
+        "cusp_required",
+    ):
+        if registry.get(field) is not False:
+            raise ConfigValidationError(f"scoring registry {field} must be false")
+    if scope.get("gate_id") != K_APC_GATE_ID:
+        raise ConfigValidationError("K/APC scoring contract must target K_only_vs_APC")
+    if tuple(scope.get("truth_families", ())) != K_APC_TRUTH_FAMILIES:
+        raise ConfigValidationError("K/APC scoring truth families must be MECH0/MECH1")
+    if scope.get("real_data_allowed") is not False:
+        raise ConfigValidationError("K/APC scoring contract must prohibit real data")
+    if scope.get("transfer_outcomes_allowed") is not False:
+        raise ConfigValidationError("K/APC scoring contract must prohibit transfer outcomes")
+    if tuple(feature_columns or ()) != MECHANISTIC_OBSERVED_FEATURES:
+        raise ConfigValidationError("K/APC scoring features must match the smoke observed features")
+    if not isinstance(candidate_models, list) or len(candidate_models) != 2:
+        raise ConfigValidationError("K/APC scoring contract requires exactly two candidates")
+    expected_models = (
+        ("SCORE0_capacity_only_rank1", 1, 0),
+        ("SCORE1_static_continuous_apc_rank5", 5, 1),
+    )
+    for record, expected in zip(candidate_models, expected_models, strict=True):
+        expected_id, expected_rank, expected_tier = expected
+        if record.get("id") != expected_id:
+            raise ConfigValidationError(f"unexpected K/APC candidate id: {record.get('id')}")
+        if int(record.get("latent_rank", -1)) != expected_rank:
+            raise ConfigValidationError(f"{expected_id} latent_rank must be {expected_rank}")
+        if int(record.get("structural_tier", -1)) != expected_tier:
+            raise ConfigValidationError(f"{expected_id} structural_tier must be {expected_tier}")
+    if rule.get("primary_metric") != "complexity_adjusted_heldout_log_density_mean_per_row":
+        raise ConfigValidationError("K/APC scoring primary metric must be complexity-adjusted density")
+    if rule.get("raw_metric") != "heldout_log_density_mean_per_row":
+        raise ConfigValidationError("K/APC scoring raw metric is invalid")
+    if rule.get("selection_status") != "engineering_smoke_selection_only":
+        raise ConfigValidationError("K/APC scoring selection status must remain engineering-only")
+    if rule.get("no_confirmatory_claims") is not True:
+        raise ConfigValidationError("K/APC scoring contract must prohibit confirmatory claims")
+    residual_floor = float(rule.get("residual_variance_floor", 0.0))
+    if residual_floor <= 0.0:
+        raise ConfigValidationError("residual_variance_floor must be positive")
+    margin = float(rule.get("practical_equivalence_margin", -1.0))
+    if margin < 0.0:
+        raise ConfigValidationError("practical_equivalence_margin must be non-negative")
+    return KAPCScoringContract(
+        registry_id=str(registry["id"]),
+        feature_columns=tuple(str(item) for item in feature_columns),
+        candidate_models=tuple(dict(item) for item in candidate_models),
+        primary_metric=str(rule["primary_metric"]),
+        raw_metric=str(rule["raw_metric"]),
+        residual_variance_floor=residual_floor,
+        practical_equivalence_margin=margin,
+        config_hash=hash_mapping(config),
+    )
+
+
+def score_capacity_vs_apc_registered(
     frame_without_truth: pd.DataFrame,
     split,
     *,
-    feature_columns: Iterable[str] = MECHANISTIC_OBSERVED_FEATURES,
+    scoring_contract: KAPCScoringContract | None = None,
 ) -> pd.DataFrame:
-    """Score placeholder rank models on a truth-stripped participant split."""
+    """Score registered first-gate covariance models on a truth-stripped split."""
 
     assert_no_ground_truth_columns(frame_without_truth)
     assert_no_participant_overlap(frame_without_truth, split)
-    features = tuple(feature_columns)
+    scoring_contract = scoring_contract or load_k_apc_scoring_contract()
+    features = scoring_contract.feature_columns
     train = frame_without_truth.loc[list(split.train_indices), list(features)]
     test = frame_without_truth.loc[list(split.test_indices), list(features)]
     rows = []
-    for model_id, rank in (
-        ("SCORE0_capacity_only_rank1", 1),
-        ("SCORE1_static_continuous_apc_rank5", 5),
-    ):
-        result = _rank_gaussian_score(train, test, rank=rank)
+    for candidate in scoring_contract.candidate_models:
+        model_id = str(candidate["id"])
+        rank = int(candidate["latent_rank"])
+        result = _covariance_likelihood_score(
+            train,
+            test,
+            rank=rank,
+            residual_variance_floor=scoring_contract.residual_variance_floor,
+        )
         rows.append(
             {
                 "model_id": model_id,
-                "model_status": "placeholder_engineering_scaffold",
+                "model_status": "registered_first_gate_engineering_scaffold",
                 "rank": rank,
-                "heldout_log_density_mean_per_row": result["heldout_log_density_mean_per_row"],
+                "structural_tier": int(candidate["structural_tier"]),
+                scoring_contract.raw_metric: result["heldout_log_density_mean_per_row"],
+                scoring_contract.primary_metric: result[
+                    "complexity_adjusted_heldout_log_density_mean_per_row"
+                ],
+                "complexity_penalty_per_heldout_row": result[
+                    "complexity_penalty_per_heldout_row"
+                ],
+                "parameter_count": result["parameter_count"],
                 "train_reconstruction_mse": result["train_reconstruction_mse"],
                 "test_reconstruction_mse": result["test_reconstruction_mse"],
                 "n_train_rows": int(train.shape[0]),
@@ -282,7 +384,21 @@ def score_capacity_vs_apc_placeholders(
                 "truth_columns_received": 0,
             }
         )
-    return pd.DataFrame(rows)
+    scores = pd.DataFrame(rows)
+    return _add_registered_selection(scores, scoring_contract)
+
+
+def score_capacity_vs_apc_placeholders(
+    frame_without_truth: pd.DataFrame,
+    split,
+    *,
+    feature_columns: Iterable[str] = MECHANISTIC_OBSERVED_FEATURES,
+) -> pd.DataFrame:
+    """Backward-compatible wrapper for the registered first-gate scorer."""
+
+    if tuple(feature_columns) != MECHANISTIC_OBSERVED_FEATURES:
+        raise ConfigValidationError("custom K/APC feature columns are no longer supported")
+    return score_capacity_vs_apc_registered(frame_without_truth, split)
 
 
 def k_apc_smoke_report(
@@ -309,7 +425,7 @@ def k_apc_smoke_report(
         "MECH1: K + C_signal + A_evidence + T_commit + PC_calibration -> Y_behavior",
         "```",
         "",
-        "The scorer is a placeholder engineering scaffold and is not a frozen M2.8 model tournament.",
+        "The scorer is a registered first-gate engineering scaffold, not a full M2.8 tournament.",
         "",
         "## Generation Audit",
         "",
@@ -319,7 +435,7 @@ def k_apc_smoke_report(
         "",
         split_audit.to_csv(index=False, lineterminator="\n"),
         "",
-        "## Placeholder Scores",
+        "## Registered First-Gate Scores",
         "",
         model_scores.to_csv(index=False, lineterminator="\n"),
     ]
@@ -367,7 +483,13 @@ def _observed_features(
     }
 
 
-def _rank_gaussian_score(train: pd.DataFrame, test: pd.DataFrame, *, rank: int) -> dict[str, float]:
+def _covariance_likelihood_score(
+    train: pd.DataFrame,
+    test: pd.DataFrame,
+    *,
+    rank: int,
+    residual_variance_floor: float,
+) -> dict[str, float]:
     train_values = train.to_numpy(dtype=float)
     test_values = test.to_numpy(dtype=float)
     means = train_values.mean(axis=0)
@@ -375,23 +497,85 @@ def _rank_gaussian_score(train: pd.DataFrame, test: pd.DataFrame, *, rank: int) 
     scales = np.where(scales <= 1e-8, 1.0, scales)
     train_z = (train_values - means) / scales
     test_z = (test_values - means) / scales
-    _, _, vh = np.linalg.svd(train_z, full_matrices=False)
-    rank = min(rank, vh.shape[0] - 1)
-    components = vh[:rank, :]
-    train_recon = train_z @ components.T @ components
-    test_recon = test_z @ components.T @ components
+    covariance = np.cov(train_z, rowvar=False)
+    eigenvalues, eigenvectors = np.linalg.eigh(covariance)
+    order = np.argsort(eigenvalues)[::-1]
+    eigenvalues = eigenvalues[order]
+    eigenvectors = eigenvectors[:, order]
+    n_features = train_z.shape[1]
+    rank = min(rank, n_features - 1)
+    if rank:
+        residual_variance = (
+            float(np.mean(eigenvalues[rank:])) if rank < len(eigenvalues) else residual_variance_floor
+        )
+        residual_variance = max(residual_variance, residual_variance_floor)
+        loadings = eigenvectors[:, :rank] @ np.diag(
+            np.sqrt(np.maximum(eigenvalues[:rank] - residual_variance, 0.0))
+        )
+        model_covariance = loadings @ loadings.T + residual_variance * np.eye(n_features)
+        components = eigenvectors[:, :rank].T
+    else:
+        residual_variance = 1.0
+        model_covariance = np.eye(n_features)
+        components = np.empty((0, n_features))
+    train_recon = train_z @ components.T @ components if rank else np.zeros_like(train_z)
+    test_recon = test_z @ components.T @ components if rank else np.zeros_like(test_z)
     train_resid = train_z - train_recon
     test_resid = test_z - test_recon
-    residual_var = np.var(train_resid, axis=0, ddof=1)
-    residual_var = np.maximum(residual_var, 0.05)
-    log_density = -0.5 * (
-        np.log(2.0 * math.pi * residual_var) + (test_resid**2 / residual_var)
-    ).sum(axis=1)
+    sign, log_determinant = np.linalg.slogdet(model_covariance)
+    if sign <= 0:
+        raise FloatingPointError("K/APC covariance model is not positive definite")
+    inverse = np.linalg.inv(model_covariance)
+    quadratic = np.einsum("ij,jk,ik->i", test_z, inverse, test_z)
+    log_density = -0.5 * (n_features * np.log(2.0 * math.pi) + log_determinant + quadratic)
+    parameter_count = _covariance_model_parameter_count(n_features, rank)
+    penalty = 0.5 * parameter_count * np.log(train_z.shape[0]) / test_z.shape[0]
     return {
         "heldout_log_density_mean_per_row": float(log_density.mean()),
+        "complexity_adjusted_heldout_log_density_mean_per_row": float(log_density.mean() - penalty),
+        "complexity_penalty_per_heldout_row": float(penalty),
+        "parameter_count": int(parameter_count),
         "train_reconstruction_mse": float(np.mean(train_resid**2)),
         "test_reconstruction_mse": float(np.mean(test_resid**2)),
     }
+
+
+def _add_registered_selection(
+    scores: pd.DataFrame,
+    scoring_contract: KAPCScoringContract,
+) -> pd.DataFrame:
+    ranked = scores.sort_values(
+        [scoring_contract.primary_metric, "structural_tier"],
+        ascending=[False, True],
+        kind="mergesort",
+    )
+    best_score = float(ranked.iloc[0][scoring_contract.primary_metric])
+    practically_tied = scores[
+        scores[scoring_contract.primary_metric]
+        >= best_score - scoring_contract.practical_equivalence_margin
+    ].copy()
+    selected = practically_tied.sort_values(
+        ["structural_tier", scoring_contract.primary_metric],
+        ascending=[True, False],
+        kind="mergesort",
+    ).iloc[0]
+    numerical_best_model_id = str(ranked.iloc[0]["model_id"])
+    selected_model_id = str(selected["model_id"])
+    scores = scores.copy()
+    scores["selected_model_id"] = selected_model_id
+    scores["numerical_best_model_id"] = numerical_best_model_id
+    scores["same_gate_practical_ambiguity"] = bool(practically_tied.shape[0] > 1)
+    scores["selection_metric"] = scoring_contract.primary_metric
+    scores["selection_status"] = "engineering_smoke_selection_only"
+    return scores
+
+
+def _covariance_model_parameter_count(n_features: int, rank: int) -> int:
+    means = n_features
+    scales = n_features
+    loadings = n_features * rank - rank * (rank - 1) // 2
+    residual_variance = 1
+    return means + scales + loadings + residual_variance
 
 
 def _variable_audit(
@@ -456,6 +640,13 @@ def _atomic_write_json(path: Path, payload: Any) -> None:
     temporary.replace(path)
 
 
+def _required_mapping(config: dict[str, Any], key: str) -> dict[str, Any]:
+    value = config.get(key)
+    if not isinstance(value, dict) or not value:
+        raise ConfigValidationError(f"{key} must be a non-empty mapping")
+    return value
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point for the first M2.8 engineering smoke."""
 
@@ -463,9 +654,14 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default="config/mechanistic_identifiability_v1.yaml")
+    parser.add_argument("--scoring-config", default=K_APC_SCORING_CONFIG_PATH)
     parser.add_argument("--output-dir", default="reports/generated/m2_8_k_apc_smoke")
     args = parser.parse_args(argv)
-    outputs = run_k_apc_smoke(args.config, output_dir=args.output_dir)
+    outputs = run_k_apc_smoke(
+        args.config,
+        output_dir=args.output_dir,
+        scoring_config_path=args.scoring_config,
+    )
     print(
         json.dumps(
             {

@@ -335,10 +335,16 @@ trident_validation.mechanistic.k_apc_smoke
 
 This smoke may generate known-truth synthetic `K` and APC variables, write
 truth-column audits, strip all `synthetic_*` fields before scoring, and exercise
-a placeholder rank-based scoring scaffold. The placeholder scorer is not the
-frozen M2.8 model tournament and its winners must not be interpreted as
-scientific evidence. Its purpose is to validate deterministic generation,
-participant-isolated splitting, truth-leakage protection and basic
+the registered first-gate scoring contract:
+
+```text
+config/mechanistic_k_apc_scoring_v1.yaml
+```
+
+The first-gate scorer is not the full M2.8 model tournament and its smoke
+selection counts must not be interpreted as confirmatory scientific evidence.
+Its purpose is to validate deterministic generation, participant-isolated
+splitting, truth-leakage protection, complexity-aware score plumbing and basic
 target-versus-realised variable auditing before richer mechanistic models are
 implemented.
 

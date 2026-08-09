@@ -9,8 +9,9 @@ from trident_validation.mechanistic.k_apc_smoke import (
     K_APC_GATE_ID,
     MECHANISTIC_OBSERVED_FEATURES,
     generate_k_apc_unit,
+    load_k_apc_scoring_contract,
     run_k_apc_smoke,
-    score_capacity_vs_apc_placeholders,
+    score_capacity_vs_apc_registered,
 )
 from trident_validation.splits import participant_train_test_split
 from trident_validation.synthetic.recovery import strip_ground_truth_columns
@@ -18,6 +19,7 @@ from trident_validation.synthetic.recovery import strip_ground_truth_columns
 
 ROOT = Path(__file__).resolve().parents[1]
 PLAN_PATH = ROOT / "config/mechanistic_identifiability_v1.yaml"
+SCORING_PATH = ROOT / "config/mechanistic_k_apc_scoring_v1.yaml"
 
 
 def _scratch_dir() -> Path:
@@ -63,7 +65,7 @@ def test_mech0_has_capacity_truth_only_and_mech1_has_apc_truth():
     assert mech1["synthetic_K"].var() > 0.5
 
 
-def test_placeholder_scorer_rejects_truth_columns_and_accepts_stripped_data():
+def test_registered_scorer_rejects_truth_columns_and_accepts_stripped_data():
     frame = generate_k_apc_unit(_schedule_row("MECH1"))
     stripped = strip_ground_truth_columns(frame)
     split = participant_train_test_split(
@@ -74,22 +76,53 @@ def test_placeholder_scorer_rejects_truth_columns_and_accepts_stripped_data():
     )
 
     with pytest.raises(ValueError, match="ground-truth columns are not allowed"):
-        score_capacity_vs_apc_placeholders(frame, split)
+        score_capacity_vs_apc_registered(frame, split)
 
-    scores = score_capacity_vs_apc_placeholders(stripped, split)
+    scores = score_capacity_vs_apc_registered(stripped, split)
     assert scores["truth_columns_received"].eq(0).all()
     assert set(scores["model_id"]) == {
         "SCORE0_capacity_only_rank1",
         "SCORE1_static_continuous_apc_rank5",
     }
+    assert scores["selection_status"].eq("engineering_smoke_selection_only").all()
+    assert "complexity_adjusted_heldout_log_density_mean_per_row" in scores.columns
+
+
+def test_registered_scorer_smoke_separates_k_only_from_apc_truth():
+    selected = {}
+    for family_id in ("MECH0", "MECH1"):
+        row = _schedule_row(family_id)
+        frame = strip_ground_truth_columns(generate_k_apc_unit(row))
+        split = participant_train_test_split(
+            frame,
+            test_size=float(row["participant_holdout_fraction"]),
+            seed=int(row["split_seed"]),
+            participant_columns=("source_dataset", "participant_id"),
+        )
+        scores = score_capacity_vs_apc_registered(frame, split)
+        selected[family_id] = scores["selected_model_id"].iloc[0]
+
+    assert selected == {
+        "MECH0": "SCORE0_capacity_only_rank1",
+        "MECH1": "SCORE1_static_continuous_apc_rank5",
+    }
+
+
+def test_k_apc_scoring_contract_blocks_real_transfer_and_cusp_claims():
+    contract = load_k_apc_scoring_contract(SCORING_PATH)
+
+    assert contract.registry_id == "mechanistic_k_apc_scoring_v1"
+    assert contract.primary_metric == "complexity_adjusted_heldout_log_density_mean_per_row"
+    assert contract.feature_columns == MECHANISTIC_OBSERVED_FEATURES
 
 
 def test_k_apc_smoke_runs_first_gate_only_and_writes_audits():
-    outputs = run_k_apc_smoke(PLAN_PATH, output_dir=_scratch_dir())
+    outputs = run_k_apc_smoke(PLAN_PATH, output_dir=_scratch_dir(), scoring_config_path=SCORING_PATH)
 
     assert outputs.manifest["gate_id"] == K_APC_GATE_ID
     assert outputs.manifest["n_units"] == 4
     assert outputs.manifest["n_rows"] == 4 * 48 * 2 * 16
+    assert outputs.manifest["scoring_contract_id"] == "mechanistic_k_apc_scoring_v1"
     assert outputs.manifest["model_winner_interpretation_allowed"] is False
     assert set(outputs.generation_audit["truth_family_id"]) == {"MECH0", "MECH1"}
     assert set(outputs.split_audit["gate_id"]) == {K_APC_GATE_ID}

@@ -30,6 +30,12 @@ config/mechanistic_identifiability_v1.yaml
 
 Config hash:
 sha256:f3f482c4c4ccaf83b5dccb6947844475930f518c3339d3e84f0c87ad13346c45
+
+Registered K/APC scoring config:
+config/mechanistic_k_apc_scoring_v1.yaml
+
+Registered K/APC scoring config hash:
+sha256:20c37197e586b9252c1ce3776a86d2e8e1e25656232da17af74524a55ac1b821
 ```
 
 ## Command
@@ -38,6 +44,7 @@ sha256:f3f482c4c4ccaf83b5dccb6947844475930f518c3339d3e84f0c87ad13346c45
 $env:PYTHONPATH='src'
 python -m trident_validation.mechanistic.k_apc_smoke `
   --config config/mechanistic_identifiability_v1.yaml `
+  --scoring-config config/mechanistic_k_apc_scoring_v1.yaml `
   --output-dir reports/generated/m2_8_k_apc_smoke
 ```
 
@@ -85,23 +92,42 @@ Mean realised truth variances across the two smoke replicates per family:
 This confirms the first-gate generator distinguishes capacity-only truth from
 capacity-plus-APC truth at the latent-variable level.
 
-## Placeholder Scorer
+## Registered First-Gate Scorer
 
-The smoke includes two placeholder engineering scorers:
+The smoke now uses a registered first-gate engineering scoring contract:
+
+```text
+config/mechanistic_k_apc_scoring_v1.yaml
+```
+
+It compares:
 
 ```text
 SCORE0_capacity_only_rank1
 SCORE1_static_continuous_apc_rank5
 ```
 
-These are not frozen M2.8 model definitions and do not implement the later
-selection contract. They exist only to prove that truth stripping,
-participant-isolated splitting and score-table plumbing work.
+The scorer estimates train-standardised low-rank Gaussian covariance models and
+selects by:
 
-The rank-5 placeholder can dominate the rank-1 placeholder even under MECH0
-because no frozen complexity/adjudication rule has been registered for this
-temporary scorer. This is a scorer-scaffold limitation, not a scientific result
-about APC identifiability.
+```text
+complexity_adjusted_heldout_log_density_mean_per_row
+```
+
+using a BIC-style parameter penalty per held-out row and a pre-specified
+practical-equivalence margin with lower-tier tie break. This is still an
+engineering smoke scorer, not the full M2.8 model tournament.
+
+Smoke selection check:
+
+| Truth family | Selected first-gate scorer |
+|---|---:|
+| MECH0 | 2/2 SCORE0_capacity_only_rank1 |
+| MECH1 | 2/2 SCORE1_static_continuous_apc_rank5 |
+
+This is a bounded engineering check that the registered scorer can separate
+the two clean known-truth first-gate smoke cases. It is not a pilot recovery
+rate and does not authorise real-data interpretation.
 
 ## Local Output Hashes
 
@@ -110,13 +136,13 @@ generation_audit.csv:
 sha256:dc0d46a0bd338f453ca4ebfae10811f748c81f90bb16532b5761dc1823f59a56
 
 model_scores.csv:
-sha256:c90022333946a4b4934734c17ee12246cbea03bca3f21707d212757764382fe4
+sha256:32365d04469c5e76b42ca2e4811d4c288df93b568b742c443c10fb1e78f78f45
 
 split_audit.csv:
 sha256:ccf64620ce59de76da9ad0a85f9bbc02d8888e3c5e78b28c7ca1b9bbd00cf143
 
 local smoke report:
-sha256:4da6039faf219be1186f8c3370019bfc9aa4936079815e4154c6222ef33dad3b
+sha256:78c2924b09bf019e7a9ad79afa9fdface4c644166b8fdbd0beb1d43070f8f3d1
 ```
 
 ## Interpretation Boundary
@@ -125,7 +151,8 @@ This smoke can be interpreted only as:
 
 ```text
 the first M2.8 generator/split/truth-stripping/audit pathway works for
-K_only_vs_APC.
+K_only_vs_APC, and the registered first-gate scorer can be run without truth
+leakage.
 ```
 
 It cannot be interpreted as:
@@ -142,6 +169,7 @@ a cusp or neural criticality is present.
 
 ## Next Step
 
-The next pre-outcome step is to replace the placeholder rank scorer with a
-registered first-gate M2.8 scoring contract that gives `K`-only and static APC
-models a fair complexity-aware comparison before any larger M2.8 pilot.
+The next pre-outcome step is a real-data readiness preflight: map available
+public datasets to the M3 variable registry, declare which variables each task
+family can and cannot support, and freeze the first public mechanism-analysis
+protocol before fitting any real-data mechanism model.

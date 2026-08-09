@@ -1,0 +1,54 @@
+registry:
+  id: mechanistic_k_apc_scoring_v1
+  milestone: M2_8_K_only_vs_APC_first_gate
+  status: pre_outcome_engineering_smoke_scoring_contract
+  formal_claims_allowed: false
+  real_transfer_outcomes_allowed: false
+  trident_validation_claim_allowed: false
+  pace_claim_allowed: false
+  dynamic_regime_claim_allowed: false
+  neural_criticality_claim_allowed: false
+  cusp_required: false
+
+scope:
+  gate_id: K_only_vs_APC
+  truth_families:
+    - MECH0
+    - MECH1
+  scoring_data: truth_stripped_synthetic_observed_features_only
+  real_data_allowed: false
+  transfer_outcomes_allowed: false
+  model_family_status: first_gate_engineering_scoring_contract
+
+feature_columns:
+  - signal_recovery_score
+  - evidence_update_score
+  - commit_control_score
+  - predictive_calibration_score
+  - accuracy
+  - mean_response_speed
+  - rt_cv
+  - throughput_proxy
+
+candidate_models:
+  - id: SCORE0_capacity_only_rank1
+    label: capacity_only_covariance
+    latent_rank: 1
+    structural_tier: 0
+  - id: SCORE1_static_continuous_apc_rank5
+    label: capacity_plus_static_apc_covariance
+    latent_rank: 5
+    structural_tier: 1
+
+scoring_rule:
+  likelihood: heldout_gaussian_covariance_density
+  covariance_model: train_standardised_pca_low_rank_plus_isotropic_residual
+  residual_variance_floor: 0.05
+  primary_metric: complexity_adjusted_heldout_log_density_mean_per_row
+  raw_metric: heldout_log_density_mean_per_row
+  complexity_penalty: bic_style_train_parameter_penalty_applied_per_heldout_row
+  parameter_count_rule: p_means_plus_p_scales_plus_rank_loadings_minus_rotational_degrees_plus_one_residual_variance
+  practical_equivalence_margin: 0.02
+  tie_break: lower_structural_tier
+  selection_status: engineering_smoke_selection_only
+  no_confirmatory_claims: true
