@@ -1,0 +1,34 @@
+{
+  "config_hash": "sha256:bd609fcf95ff5dcf7b800d15f6b3dada4c3b4d37c8536e7aa8fed75a1ccdf675",
+  "config_path": "config/public_mechanism_readiness_v1.yaml",
+  "formal_claims_allowed": false,
+  "input_hashes": {
+    "full_acdc_feature_summary": "sha256:a1c119f42c7d3784d91644f6e5e6d7ce01516f768300094bb6bcf793a5e7e5dd",
+    "full_acdc_template_support": "sha256:217c7ec62e9dd525a8f5ed472951c5d7a7e332264db2515a91d4434c6ef6b5e6",
+    "full_acdc_temporal_summary": "sha256:dad29bfa0afae441fc54823bb481227c7c5d96f07791a5dde15341e7456123fd",
+    "paired_session_feature_summary": "sha256:338dd8a7fb7beb442212795a03750f5b48732d77bfa781069f1b8d67c4081dd1",
+    "paired_session_repeated_person_stability": "sha256:6d19f43aa2bef343a0e9e766f548be0cf1b64f66ece097f85267266ecd1e91bc",
+    "paired_session_support": "sha256:e9fbf940847aa78d0099415a53e047e55d2fedd9ecd555fdc080f1bc36eb38ef"
+  },
+  "model_fitting_allowed": false,
+  "n_variables": 10,
+  "output_hashes": {
+    "report": "sha256:86e1518f8014bf6dc02197a000ffc6812c0d537982e55327bf3e7c3d357e0852",
+    "support_matrix": "sha256:8a98f18fb3edd87434d4664be857aab1d54813467182b868348826fff51616d4"
+  },
+  "real_transfer_outcomes_allowed": false,
+  "status": "aggregate_support_preflight_only",
+  "study_id": "public_mechanism_readiness_v1",
+  "support_counts": {
+    "descriptive_only": 1,
+    "forbidden": 1,
+    "partial": 2,
+    "partial_proxy_only": 1,
+    "partial_temporal_not_regime": 1,
+    "supported": 2,
+    "unsupported": 2
+  },
+  "trident_validation_claim_allowed": false,
+  "variable_registry_commit": "4073c76357954a386b30d2cad792e4c6bb4eb393",
+  "variable_registry_id": "hrp_stack_variable_registry_v2"
+}

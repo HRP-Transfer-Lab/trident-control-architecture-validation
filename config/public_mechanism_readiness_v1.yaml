@@ -1,0 +1,111 @@
+registry:
+  id: public_mechanism_readiness_v1
+  milestone: M5_public_mechanism_readiness_preflight
+  status: aggregate_support_preflight_only
+  variable_registry_path: config/hrp_stack_variable_registry_v2.yaml
+  variable_registry_commit: 4073c76357954a386b30d2cad792e4c6bb4eb393
+  formal_claims_allowed: false
+  real_transfer_outcomes_allowed: false
+  trident_validation_claim_allowed: false
+  neural_criticality_claim_allowed: false
+  cusp_required: false
+  model_fitting_allowed: false
+
+inputs:
+  full_acdc_aggregate_dir: reports/generated/empirical_twin_preflight_v1_full_acdc
+  paired_aggregate_dir: reports/generated/empirical_twin_preflight_v1_full_acdc_paired_session
+  aggregate_only: true
+  raw_participant_data_allowed: false
+
+support_thresholds:
+  full_acdc_template_min_participants: 50
+  full_acdc_template_min_rows: 100
+  full_acdc_template_min_feature_coverage: 0.95
+  paired_min_repeat_participants: 30
+  paired_min_observed_rows: 100
+
+variable_feature_map:
+  K:
+    required_sources:
+      - full_acdc
+      - paired_session
+    acdc_features:
+      - accuracy
+      - median_rt_ms
+      - mean_response_speed
+      - rt_cv
+      - throughput_proxy
+    paired_features:
+      - accuracy
+      - mean_rt_ms
+      - throughput_proxy
+  V:
+    required_sources:
+      - paired_session
+    paired_tasks:
+      - SART
+    paired_features:
+      - rt_cv
+      - commission_rate
+      - omission_rate
+      - anticipatory_rate
+      - pre_failure_speeding_ms
+  C_signal:
+    required_sources:
+      - paired_session
+    paired_tasks:
+      - Stroop
+      - Flanker
+    paired_features:
+      - conflict_cost_rt
+      - conflict_cost_accuracy
+  A_evidence:
+    required_sources: []
+    required_observables:
+      - post_error_adjustment
+      - change_point_adaptation
+      - evidence_weighting
+  T_commit:
+    required_sources:
+      - full_acdc
+      - paired_session
+    proxy_features:
+      - median_rt_ms
+      - mean_rt_ms
+      - mean_response_speed
+      - accuracy
+  PC_calibration:
+    required_sources: []
+    required_observables:
+      - confidence_calibration
+      - prediction_error_sensitivity
+      - source_reliability_weighting
+  R_dynamic:
+    required_sources:
+      - full_acdc
+    acdc_temporal_features:
+      - lag1
+      - fatigue
+  P_pace:
+    required_sources: []
+    status_rule: descriptive_only_until_independently_supported
+  Y_behavior:
+    required_sources:
+      - full_acdc
+      - paired_session
+    observed_features:
+      - accuracy
+      - median_rt_ms
+      - mean_rt_ms
+      - mean_response_speed
+      - rt_cv
+      - throughput_proxy
+      - conflict_cost_rt
+      - conflict_cost_accuracy
+  Transfer_external:
+    status_rule: forbidden_until_prospective_prediction_freeze
+
+outputs:
+  support_matrix_csv: research-program/M5_PUBLIC_MECHANISM_VARIABLE_SUPPORT_MATRIX.csv
+  manifest_json: research-program/M5_PUBLIC_MECHANISM_READINESS_MANIFEST.json
+  report_md: research-program/M5_PUBLIC_MECHANISM_READINESS_PREFLIGHT.md

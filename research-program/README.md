@@ -89,6 +89,13 @@ deterministic MECH0/MECH1 generation, participant-isolated splitting,
 truth-column stripping and variable audits, while explicitly disallowing
 confirmatory scientific interpretation of first-gate scorer outputs.
 
+### `M5_PUBLIC_MECHANISM_READINESS_PREFLIGHT.md`
+
+Maps the available aggregate public-data evidence onto the frozen M3 variable
+registry before any mechanism model is fit to real data. It distinguishes
+supported, partial, unsupported, descriptive-only and forbidden variables for
+the first public mechanism-analysis design.
+
 ### `M3_VARIABLE_ARCHITECTURE_V2.md`
 
 Freezes the Trident/HRP Stack variable architecture for mechanistic synthetic
