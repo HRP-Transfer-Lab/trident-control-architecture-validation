@@ -96,6 +96,13 @@ registry before any mechanism model is fit to real data. It distinguishes
 supported, partial, unsupported, descriptive-only and forbidden variables for
 the first public mechanism-analysis design.
 
+### `M5_PUBLIC_MECHANISM_TEST_LADDER.md`
+
+Freezes the staged public mechanism-test order: first `K/C_signal/V`, then
+descriptive PACE expression increment, then dynamic trajectories, and only then
+behavioural criticality-language tests if earlier gates pass. Its
+machine-readable companion is `config/public_mechanism_test_ladder_v1.yaml`.
+
 ### `M3_VARIABLE_ARCHITECTURE_V2.md`
 
 Freezes the Trident/HRP Stack variable architecture for mechanistic synthetic

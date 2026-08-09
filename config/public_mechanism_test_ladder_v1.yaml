@@ -1,0 +1,153 @@
+registry:
+  id: public_mechanism_test_ladder_v1
+  milestone: M5_to_M6_public_mechanism_test_ladder
+  status: pre_analysis_protocol
+  variable_registry_path: config/hrp_stack_variable_registry_v2.yaml
+  readiness_matrix_path: research-program/M5_PUBLIC_MECHANISM_VARIABLE_SUPPORT_MATRIX.csv
+  readiness_commit: 53112d9bc020a102e789b9b13eb643ba870008c8
+  formal_claims_allowed: false
+  real_transfer_outcomes_allowed: false
+  trident_validation_claim_allowed: false
+  neural_criticality_claim_allowed: false
+  cusp_required: false
+
+global_rules:
+  participant_isolated_validation_required: true
+  dataset_transport_required_when_feasible: true
+  no_post_outcome_model_redefinition: true
+  no_transfer_outcome_inspection: true
+  no_forced_pace_profiles: true
+  no_neural_criticality_claim: true
+  criticality_language_requires_final_stage: true
+
+stages:
+  - id: STAGE1_K_C_V
+    label: control_and_readiness_separation
+    status: next_real_data_analysis_candidate
+    question: Can control and readiness be separated?
+    variables:
+      primary:
+        - K
+        - C_signal
+        - V
+      outcome:
+        - Y_behavior
+      excluded:
+        - P_pace
+        - R_dynamic
+        - Transfer_external
+        - PC_calibration
+        - A_evidence
+    allowed_sources:
+      - full_acdc_aggregates
+      - paired_session_aggregates
+    minimum_support:
+      K: supported
+      C_signal: partial
+      V: partial
+      Y_behavior: supported
+    candidate_comparisons:
+      - K_only
+      - K_plus_C_signal
+      - K_plus_V
+      - K_plus_C_signal_plus_V
+      - K_plus_C_signal_by_V
+    proceed_if:
+      - participant_isolated_scores_are_finite
+      - C_signal_and_V_are_not_defined_from_same_outcome_residual
+      - V_increment_test_does_not_use_transfer_outcomes
+      - source_task_sensitivity_reported
+
+  - id: STAGE2_PACE_EXPRESSION
+    label: pace_expression_increment
+    status: gated_after_stage1_review
+    question: Do regulated/brittle/compensatory/overloaded expressions add predictive structure beyond continuous K/C/V?
+    variables:
+      primary:
+        - K
+        - C_signal
+        - V
+        - P_pace
+      outcome:
+        - Y_behavior
+      excluded:
+        - R_dynamic
+        - Transfer_external
+        - PC_calibration
+        - A_evidence
+    minimum_support:
+      P_pace: descriptive_only
+    candidate_comparisons:
+      - continuous_K_C_V
+      - continuous_K_C_V_plus_descriptive_PACE_expression
+      - PACE_expression_only_negative_control
+    proceed_if:
+      - stage1_review_accepts_real_data_protocol
+      - PACE_labels_are_derived_inside_training_folds_only
+      - PACE_is_descriptive_not_ontology
+      - no_forced_four_profile_claim
+
+  - id: STAGE3_DYNAMIC_TRAJECTORIES
+    label: dynamic_regime_increment
+    status: gated_after_stage2_review
+    question: Are reproducible adaptive/locked/scattered regimes present beyond static PACE and vigilance?
+    variables:
+      primary:
+        - K
+        - C_signal
+        - V
+        - P_pace
+        - R_dynamic
+      outcome:
+        - Y_behavior
+      excluded:
+        - Transfer_external
+        - PC_calibration
+        - A_evidence
+    minimum_support:
+      R_dynamic: partial_temporal_not_regime
+    candidate_comparisons:
+      - static_K_C_V
+      - static_K_C_V_plus_descriptive_PACE
+      - continuous_autoregressive_dynamics
+      - generic_hidden_state_dynamics
+      - adaptive_locked_scattered_regime_candidates
+    proceed_if:
+      - stage2_review_accepts_dynamic_escalation
+      - temporal_splits_are_participant_isolated
+      - regime_labels_are_neutral
+      - dynamic_models_outperform_static_controls_on_heldout_prediction
+      - regime_reproducibility_is_reported_across_sources_or_sessions
+
+  - id: STAGE4_CRITICALITY_INTERPRETATION
+    label: behavioural_dynamic_geometry_interpretation
+    status: gated_after_stage3_review
+    question: Does the dynamic geometry have the specific behavioural signatures needed to justify near-critical/subcritical/supercritical language?
+    variables:
+      primary:
+        - R_dynamic
+        - K
+        - C_signal
+        - V
+      outcome:
+        - Y_behavior
+      excluded:
+        - Transfer_external
+    minimum_support:
+      R_dynamic: independently_supported_by_stage3
+    required_signatures:
+      - transition_sensitive_recovery
+      - reproducible_dwell_and_reentry_structure
+      - hysteresis_or_path_dependence_beyond_ar_nulls
+      - adaptive_response_to_perturbation_distinct_from_noise
+      - separation_from_generic_hmm_hsmm_and_ar_models
+      - source_or_session_transport_of_geometry
+    forbidden_interpretations:
+      - neural_criticality
+      - brain_critical_zone
+      - literal_cusp_without_registered_cusp_competitor
+      - subcritical_nearcritical_supercritical_labels_without_stage3_pass
+    proceed_if:
+      - stage3_review_accepts_criticality_language_test
+      - all_simpler_dynamic_nulls_have_been_scored
+      - claims_are_limited_to_behavioural_dynamic_analogue
