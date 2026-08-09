@@ -2146,13 +2146,14 @@ def _lag1_calibration_support_rows(
         if not np.isfinite(target) or not np.isfinite(realised):
             rows.append(
                 _support_row(
-                    feature,
+                    "",
                     0,
                     "internal_lag1_calibration",
                     "unsupported",
                     "non_finite_target_or_calibrated_estimator",
                     source_dataset=source,
                     task_id=task,
+                    feature=feature,
                     fallback_type="fixed_neutral_value",
                 )
             )
@@ -2171,13 +2172,14 @@ def _lag1_calibration_support_rows(
             fallback_type = "boundary_internal_phi"
         rows.append(
             _support_row(
-                feature,
+                "",
                 0,
                 "internal_lag1_calibration",
                 status,
                 detail,
                 source_dataset=source,
                 task_id=task,
+                feature=feature,
                 fallback_type=fallback_type,
             )
         )
