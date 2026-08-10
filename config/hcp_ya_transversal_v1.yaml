@@ -74,9 +74,12 @@ outcome_domains:
       exclude_from_K_when_target: true
       must_not_overlap_C_or_V: true
   wm_nback:
-    description: task-fMRI 2-back working-memory performance
-    primary: true
-    required_for_support: true
+    description: optional aggregate task-fMRI 2-back working-memory field; known HCP aggregate-calculation concern pending resolution
+    primary: false
+    required_for_support: false
+    analysis_eligible: false
+    status: optional_known_issue_pending
+    future_route: independently reconstructed task/run/trial-level 2-back accuracy or official HCP resolution required before inference
     columns:
       - WM_Task_2bk_Acc
     anti_circularity:
@@ -97,6 +100,7 @@ outcome_domains:
     description: optional relational-processing behavioural performance summary, if available in local HCP export
     primary: false
     required_for_support: false
+    analysis_eligible: false
     columns:
       - Relational_Task_Acc
     anti_circularity:
@@ -115,9 +119,7 @@ candidate_model_sequence:
     domains:
       - attention_control
       - wm_list_sorting
-      - wm_nback
       - reasoning_pmat
-      - reasoning_relational
   layer_specific_residual_tests:
     enabled: true
     wm_specific_candidate_requires_independent_indicators: true

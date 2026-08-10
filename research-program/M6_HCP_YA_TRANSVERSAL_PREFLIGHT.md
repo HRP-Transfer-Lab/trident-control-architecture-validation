@@ -38,20 +38,20 @@ Do lower-level K/C_candidate/V coordinates transport across attention/control, w
 | predictor | V | SCPT_SPEC | true | true | 0 |
 | outcome | attention_control | CardSort_Unadj | true | true | 0 |
 | outcome | wm_list_sorting | ListSort_Unadj | true | true | 0 |
-| outcome | wm_nback | WM_Task_2bk_Acc | true | true | 0 |
+| outcome | wm_nback | WM_Task_2bk_Acc | false | true | 0 |
 | outcome | reasoning_pmat | PMAT24_A_CR | true | true | 0 |
 | secondary_outcome | reasoning_pmat | PMAT24_A_RTCR | true | true | 0 |
 | outcome | reasoning_relational | Relational_Task_Acc | false | true | 0 |
 
 ## Domain Support
 
-| Domain | Primary | Required | Complete participants | Missing columns | Support passed |
-|---|---:|---:|---:|---|---:|
-| attention_control | false | true | 0 | none | false |
-| wm_list_sorting | true | true | 0 | none | false |
-| wm_nback | true | true | 0 | none | false |
-| reasoning_pmat | true | true | 0 | none | false |
-| reasoning_relational | false | false | 0 | none | false |
+| Domain | Primary | Required | Analysis eligible | Status | Complete participants | Missing columns | Support passed |
+|---|---:|---:|---:|---|---:|---|---:|
+| attention_control | false | true | true | support_required | 0 | none | false |
+| wm_list_sorting | true | true | true | support_required | 0 | none | false |
+| wm_nback | false | false | false | optional_known_issue_pending | 0 | none | false |
+| reasoning_pmat | true | true | true | support_required | 0 | none | false |
+| reasoning_relational | false | false | false | optional | 0 | none | false |
 
 ## Boundary
 

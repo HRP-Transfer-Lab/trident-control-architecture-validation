@@ -46,10 +46,17 @@ The intended held-out outcome domains are:
 ```text
 attention/control
 working memory: List Sorting
-working memory: 2-back task performance
 reasoning: PMAT
-reasoning/relational optional: relational-processing behavioural summary, if available
+working memory optional/future: aggregate 2-back task performance, known issue pending
+reasoning/relational optional/future: relational-processing behavioural summary, if available
 ```
+
+List Sorting is the required primary working-memory outcome for the current
+HCP support gate. The released aggregate `WM_Task_2bk_Acc` is optional and not
+analysis-eligible because of an unresolved HCP Users concern about aggregate
+WM task accuracy calculations. A 2-back outcome can be added later only through
+an official HCP resolution or a prospective reconstruction from task/run/trial
+files.
 
 The anti-circularity rule is hard:
 

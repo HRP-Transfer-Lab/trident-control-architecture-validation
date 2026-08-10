@@ -38,7 +38,12 @@ def test_hcp_extract_builder_writes_canonical_subset_and_summary():
     assert "Extra_Column_Not_Registered" not in written.columns
     assert "Relational_Task_Acc" in written.columns
     assert written["Relational_Task_Acc"].isna().all()
-    assert summary["missing_optional_columns_filled_empty"] == ["Relational_Task_Acc"]
+    assert "WM_Task_2bk_Acc" in written.columns
+    assert written["WM_Task_2bk_Acc"].isna().all()
+    assert summary["missing_optional_columns_filled_empty"] == [
+        "WM_Task_2bk_Acc",
+        "Relational_Task_Acc",
+    ]
     assert summary_path.exists()
 
 
@@ -75,7 +80,6 @@ def _mock_authorised_hcp_export(n: int) -> pd.DataFrame:
             "SCPT_SPEC": rng.normal(size=n),
             "CardSort_Unadj": rng.normal(size=n),
             "ListSort_Unadj": rng.normal(size=n),
-            "WM_Task_2bk_Acc": rng.normal(size=n),
             "PMAT24_A_CR": rng.normal(size=n),
             "PMAT24_A_RTCR": rng.normal(size=n),
         }

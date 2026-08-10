@@ -239,6 +239,8 @@ def _domain_support(data: pd.DataFrame, config: dict[str, Any]) -> pd.DataFrame:
                 "domain": domain,
                 "primary": bool(spec.get("primary", False)),
                 "required_for_support": bool(spec.get("required_for_support", True)),
+                "analysis_eligible": bool(spec.get("analysis_eligible", True)),
+                "status": str(spec.get("status", "support_required" if spec.get("required_for_support", True) else "optional")),
                 "outcome_columns": "|".join(outcome_columns),
                 "k_columns_after_exclusion": "|".join(k_columns),
                 "required_columns": "|".join(required_columns),
@@ -384,14 +386,14 @@ def _render_report(
             [
                 "## Domain Support",
                 "",
-                "| Domain | Primary | Required | Complete participants | Missing columns | Support passed |",
-                "|---|---:|---:|---:|---|---:|",
+                "| Domain | Primary | Required | Analysis eligible | Status | Complete participants | Missing columns | Support passed |",
+                "|---|---:|---:|---:|---|---:|---|---:|",
             ]
         )
         for row in domain_support.itertuples(index=False):
             lines.append(
                 f"| {row.domain} | {str(row.primary).lower()} | {str(row.required_for_support).lower()} | "
-                f"{row.complete_participants} | "
+                f"{str(row.analysis_eligible).lower()} | {row.status} | {row.complete_participants} | "
                 f"{row.missing_columns or 'none'} | {str(row.support_passed).lower()} |"
             )
         lines.append("")

@@ -187,6 +187,8 @@ def _domain_plan(config: dict[str, Any]) -> pd.DataFrame:
                 "domain": domain,
                 "primary": bool(spec.get("primary", False)),
                 "required_for_support": bool(spec.get("required_for_support", True)),
+                "analysis_eligible": bool(spec.get("analysis_eligible", True)),
+                "status": str(spec.get("status", "analysis_eligible" if spec.get("analysis_eligible", True) else "optional")),
                 "outcome_columns": "|".join(sorted(outcome_columns)),
                 "k_columns_after_exclusion": "|".join(sorted(k_columns.difference(outcome_columns))),
                 "c_candidate_columns": "|".join(_as_list(config["coordinate_sources"][_control_key(config["coordinate_sources"])]["columns"])),
@@ -200,6 +202,8 @@ def _domain_plan(config: dict[str, Any]) -> pd.DataFrame:
 def _model_plan(config: dict[str, Any]) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     for domain in config["outcome_domains"]:
+        if not bool(config["outcome_domains"][domain].get("analysis_eligible", True)):
+            continue
         for index, model in enumerate(config["primary_model_sequence"]):
             rows.append(
                 {
@@ -301,13 +305,14 @@ def _render_report(
         "",
         "## Domain Plan",
         "",
-        "| Domain | Primary | Required | Outcome columns | K columns after exclusion |",
-        "|---|---:|---:|---|---|",
+        "| Domain | Primary | Required | Analysis eligible | Status | Outcome columns | K columns after exclusion |",
+        "|---|---:|---:|---:|---|---|---|",
     ]
     for row in domain_plan.itertuples(index=False):
         lines.append(
             f"| {row.domain} | {str(row.primary).lower()} | {str(row.required_for_support).lower()} | "
-            f"{row.outcome_columns} | {row.k_columns_after_exclusion} |"
+            f"{str(row.analysis_eligible).lower()} | {row.status} | {row.outcome_columns} | "
+            f"{row.k_columns_after_exclusion} |"
         )
     lines.extend(
         [

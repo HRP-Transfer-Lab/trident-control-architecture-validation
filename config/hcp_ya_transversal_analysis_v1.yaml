@@ -63,8 +63,11 @@ outcome_domains:
       exclude_outcome_from_K: true
       forbid_overlap_with_C_or_V: true
   wm_nback:
-    primary: true
-    required_for_support: true
+    primary: false
+    required_for_support: false
+    analysis_eligible: false
+    status: optional_known_issue_pending
+    future_route: independently reconstructed task/run/trial-level 2-back accuracy or official HCP resolution required before inference
     columns:
       - WM_Task_2bk_Acc
     anti_circularity:
@@ -83,6 +86,7 @@ outcome_domains:
   reasoning_relational:
     primary: false
     required_for_support: false
+    analysis_eligible: false
     columns:
       - Relational_Task_Acc
     anti_circularity:
@@ -119,9 +123,7 @@ domain_weight_test:
     rows:
       - attention_control
       - wm_list_sorting
-      - wm_nback
       - reasoning_pmat
-      - reasoning_relational
     columns:
       - K
       - C_candidate
@@ -132,7 +134,8 @@ layer_specific_residual_tests:
   enabled_after_primary_transport_only: true
   wm_specific:
     status: blocked_until_independent_indicators_registered
-    candidate_indicators: []
+    candidate_indicators:
+      - reconstructed_2back_accuracy_future
   reasoning_specific:
     status: blocked_until_independent_indicators_registered
     candidate_indicators:

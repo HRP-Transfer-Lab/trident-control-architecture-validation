@@ -97,9 +97,16 @@ Reasoning ~ K + C_candidate + V + R_specific
 
 `W_specific` and `R_specific` remain blocked until independent indicators are
 registered. The target outcome itself cannot define the layer-specific factor.
+List Sorting is the current required primary WM outcome. The released aggregate
+`WM_Task_2bk_Acc` is optional and not analysis-eligible because of an unresolved
+HCP Users concern about aggregate WM task accuracy calculations. A 2-back
+outcome can be registered later only after official HCP resolution or
+prospective reconstruction from task/run/trial-level files.
+
 The optional HCP relational-processing behavioural summary is preflighted as a
 candidate independent reasoning/relational indicator if available; it is not
-required for the primary support gate.
+required for the primary support gate and is not analysis-eligible in this
+locked scaffold.
 
 ## Interpretation Boundary
 

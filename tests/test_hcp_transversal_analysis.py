@@ -105,7 +105,12 @@ def test_hcp_transversal_analysis_plan_ready_after_mock_passed_preflight():
     assert "PMAT24_A_CR" not in domain_plan.loc["reasoning_pmat", "k_columns_after_exclusion"].split("|")
     assert "Flanker_Unadj" not in domain_plan.loc["wm_list_sorting", "k_columns_after_exclusion"].split("|")
     assert "CardSort_Unadj" not in domain_plan.loc["wm_list_sorting", "k_columns_after_exclusion"].split("|")
+    assert bool(domain_plan.loc["wm_nback", "required_for_support"]) is False
+    assert bool(domain_plan.loc["wm_nback", "analysis_eligible"]) is False
     assert bool(domain_plan.loc["reasoning_relational", "required_for_support"]) is False
+    assert bool(domain_plan.loc["reasoning_relational", "analysis_eligible"]) is False
+    assert "wm_nback" not in set(result.model_plan["domain"])
+    assert "reasoning_relational" not in set(result.model_plan["domain"])
     assert set(result.model_plan["model_id"]) == {
         "K",
         "K_plus_C_candidate",

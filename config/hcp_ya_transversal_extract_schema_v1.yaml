@@ -87,14 +87,18 @@ heldout_outcomes:
         canonical_column: ListSort_Unadj
         role: List Sorting working-memory outcome
   wm_nback:
-    primary: true
-    required_for_support: true
+    primary: false
+    required_for_support: false
+    analysis_eligible: false
+    status: optional_known_issue_pending
+    issue: HCP Users reported an unresolved concern about released aggregate WM_Task_2bk_Acc calculation in February 2026
+    future_route: independently reconstruct 2-back accuracy from task E-Prime/run/trial-level files or use only after HCP resolution
     columns:
       WM_Task_2bk_Acc:
         hcp_source_column: WM_Task_2bk_Acc
         canonical_column: WM_Task_2bk_Acc
-        role: 2-back working-memory task outcome
-        note: rename local HCP task-fMRI column to this canonical name in the extract if needed
+        role: optional aggregate 2-back working-memory field; not primary/support-required while known issue is unresolved
+        note: not used for scientific inference by this primary support gate
   reasoning_pmat:
     primary: true
     required_for_support: true
@@ -110,6 +114,7 @@ heldout_outcomes:
   reasoning_relational:
     primary: false
     required_for_support: false
+    analysis_eligible: false
     columns:
       Relational_Task_Acc:
         hcp_source_column: Relational_Task_Acc

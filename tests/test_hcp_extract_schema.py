@@ -26,6 +26,8 @@ def test_hcp_extract_schema_is_claim_bounded_and_ordered():
     assert "PMAT24_A_CR" in schema.columns
     assert "NIH_Flanker_Unadj" not in schema.columns
     assert schema.source_to_canonical["Flanker_Unadj"] == "Flanker_Unadj"
+    assert "WM_Task_2bk_Acc" in schema.optional_columns
+    assert "WM_Task_2bk_Acc" not in schema.required_columns
     assert len(schema.columns) == len(set(schema.columns))
 
 

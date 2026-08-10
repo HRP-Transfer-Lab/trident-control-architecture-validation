@@ -44,7 +44,6 @@ PicVocab_Unadj
 SCPT_SEN
 SCPT_SPEC
 ListSort_Unadj
-WM_Task_2bk_Acc
 PMAT24_A_CR
 PMAT24_A_RTCR
 ```
@@ -64,6 +63,20 @@ Optional, non-blocking relational-processing behavioural column if available:
 ```text
 Relational_Task_Acc
 ```
+
+Optional, non-blocking n-back aggregate column:
+
+```text
+WM_Task_2bk_Acc
+```
+
+This released aggregate is flagged as `optional_known_issue_pending` because an
+HCP Users thread in February 2026 raised an unresolved concern about the
+calculation of `WM_Task_Acc`, `WM_Task_0bk_Acc` and `WM_Task_2bk_Acc`. The
+primary support gate does not require it, and it should not be used for
+scientific inference unless HCP publishes a resolution or the measure is
+independently reconstructed from task/run/trial-level files in a later
+prospective amendment.
 
 ## Construct Boundary
 
@@ -95,7 +108,7 @@ Held-out outcomes:
 ```text
 attention/control: CardSort_Unadj
 working memory: ListSort_Unadj
-working memory: WM_Task_2bk_Acc
+working memory optional/future: WM_Task_2bk_Acc
 reasoning: PMAT24_A_CR
 reasoning secondary RT: PMAT24_A_RTCR
 reasoning/relational optional: Relational_Task_Acc

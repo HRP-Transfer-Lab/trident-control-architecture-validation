@@ -19,13 +19,13 @@ Can the same individual K/C_candidate/V coordinates transport across attention, 
 
 ## Domain Plan
 
-| Domain | Primary | Required | Outcome columns | K columns after exclusion |
-|---|---:|---:|---|---|
-| attention_control | false | true | CardSort_Unadj | PicSeq_Unadj|PicVocab_Unadj|ProcSpeed_Unadj|ReadEng_Unadj |
-| wm_list_sorting | true | true | ListSort_Unadj | PicSeq_Unadj|PicVocab_Unadj|ProcSpeed_Unadj|ReadEng_Unadj |
-| wm_nback | true | true | WM_Task_2bk_Acc | PicSeq_Unadj|PicVocab_Unadj|ProcSpeed_Unadj|ReadEng_Unadj |
-| reasoning_pmat | true | true | PMAT24_A_CR|PMAT24_A_RTCR | PicSeq_Unadj|PicVocab_Unadj|ProcSpeed_Unadj|ReadEng_Unadj |
-| reasoning_relational | false | false | Relational_Task_Acc | PicSeq_Unadj|PicVocab_Unadj|ProcSpeed_Unadj|ReadEng_Unadj |
+| Domain | Primary | Required | Analysis eligible | Status | Outcome columns | K columns after exclusion |
+|---|---:|---:|---:|---|---|---|
+| attention_control | false | true | true | analysis_eligible | CardSort_Unadj | PicSeq_Unadj|PicVocab_Unadj|ProcSpeed_Unadj|ReadEng_Unadj |
+| wm_list_sorting | true | true | true | analysis_eligible | ListSort_Unadj | PicSeq_Unadj|PicVocab_Unadj|ProcSpeed_Unadj|ReadEng_Unadj |
+| wm_nback | false | false | false | optional_known_issue_pending | WM_Task_2bk_Acc | PicSeq_Unadj|PicVocab_Unadj|ProcSpeed_Unadj|ReadEng_Unadj |
+| reasoning_pmat | true | true | true | analysis_eligible | PMAT24_A_CR|PMAT24_A_RTCR | PicSeq_Unadj|PicVocab_Unadj|ProcSpeed_Unadj|ReadEng_Unadj |
+| reasoning_relational | false | false | false | optional | Relational_Task_Acc | PicSeq_Unadj|PicVocab_Unadj|ProcSpeed_Unadj|ReadEng_Unadj |
 
 ## Model Sequence
 
@@ -41,27 +41,17 @@ Can the same individual K/C_candidate/V coordinates transport across attention, 
 | wm_list_sorting | 2 | K_plus_V | K|V |
 | wm_list_sorting | 3 | K_plus_C_candidate_plus_V | K|C_candidate|V |
 | wm_list_sorting | 4 | K_plus_C_candidate_plus_V_plus_C_by_V | K|C_candidate|V|C_candidate_by_V |
-| wm_nback | 0 | K | K |
-| wm_nback | 1 | K_plus_C_candidate | K|C_candidate |
-| wm_nback | 2 | K_plus_V | K|V |
-| wm_nback | 3 | K_plus_C_candidate_plus_V | K|C_candidate|V |
-| wm_nback | 4 | K_plus_C_candidate_plus_V_plus_C_by_V | K|C_candidate|V|C_candidate_by_V |
 | reasoning_pmat | 0 | K | K |
 | reasoning_pmat | 1 | K_plus_C_candidate | K|C_candidate |
 | reasoning_pmat | 2 | K_plus_V | K|V |
 | reasoning_pmat | 3 | K_plus_C_candidate_plus_V | K|C_candidate|V |
 | reasoning_pmat | 4 | K_plus_C_candidate_plus_V_plus_C_by_V | K|C_candidate|V|C_candidate_by_V |
-| reasoning_relational | 0 | K | K |
-| reasoning_relational | 1 | K_plus_C_candidate | K|C_candidate |
-| reasoning_relational | 2 | K_plus_V | K|V |
-| reasoning_relational | 3 | K_plus_C_candidate_plus_V | K|C_candidate|V |
-| reasoning_relational | 4 | K_plus_C_candidate_plus_V_plus_C_by_V | K|C_candidate|V|C_candidate_by_V |
 
 ## Layer-Specific Residual Gate
 
 | Layer | Status | Candidate indicators | Outcome reuse allowed |
 |---|---|---|---:|
-| working_memory | blocked_until_independent_indicators_registered | none | false |
+| working_memory | blocked_until_independent_indicators_registered | reconstructed_2back_accuracy_future | false |
 | reasoning | blocked_until_independent_indicators_registered | Relational_Task_Acc | false |
 
 ## Boundary

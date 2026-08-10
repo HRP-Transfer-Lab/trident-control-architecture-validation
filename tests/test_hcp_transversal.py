@@ -72,6 +72,9 @@ def test_hcp_transversal_removes_outcome_columns_from_domain_k():
     assert "CardSort_Unadj" not in domain_support.loc["wm_list_sorting", "k_columns_after_exclusion"].split("|")
     assert bool(domain_support.loc["reasoning_relational", "required_for_support"]) is False
     assert bool(domain_support.loc["reasoning_relational", "support_passed"]) is False
+    assert bool(domain_support.loc["wm_nback", "required_for_support"]) is False
+    assert bool(domain_support.loc["wm_nback", "analysis_eligible"]) is False
+    assert bool(domain_support.loc["wm_nback", "support_passed"]) is False
     assert result.split_support["family_isolated_cv_feasible"] is True
     assert result.split_support["ordinary_participant_folds_allowed"] is False
     assert "participant_id" not in result.column_support.columns
@@ -142,7 +145,6 @@ def _mock_hcp_extract(n: int) -> pd.DataFrame:
             "SCPT_SEN": rng.normal(size=n),
             "SCPT_SPEC": rng.normal(size=n),
             "ListSort_Unadj": rng.normal(size=n),
-            "WM_Task_2bk_Acc": rng.normal(size=n),
             "PMAT24_A_CR": rng.normal(size=n),
             "PMAT24_A_RTCR": rng.normal(size=n),
         }
