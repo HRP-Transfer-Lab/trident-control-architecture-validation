@@ -129,7 +129,9 @@ def run_stage1b_sat_policy_analysis(
         "input_rows": int(len(raw)),
         "input_participants": int(raw[config["identity_columns"]["participant_id"]].nunique()),
         "support_gate_passed": bool(support.attrs["support_gate_passed"]),
-        "cross_task_rows": int(cross_scores["row_index"].nunique()),
+        "cross_task_rows": int(
+            cross_scores[["participant_id", "fold", "row_index"]].drop_duplicates().shape[0]
+        ),
         "cross_task_participants": int(cross_scores["participant_id"].nunique()),
         "adjacent_pairs": int(persistence_scores["row_index"].nunique()),
         "adjacent_pair_participants": int(persistence_scores["participant_id"].nunique()),

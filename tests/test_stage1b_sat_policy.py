@@ -152,6 +152,8 @@ def test_stage1b_runner_is_deterministic_and_participant_free(monkeypatch):
     assert first.summary["formal_claims_allowed"] is False
     assert first.summary["t_commit_claim_allowed"] is False
     assert first.summary["forbidden_columns_used"] == []
+    assert first.summary["cross_task_rows"] == 210
+    assert first.summary["adjacent_pairs"] == 140
     assert "participant_id" not in first.cross_task_contrasts.columns
     assert "participant_id" not in first.persistence_contrasts.columns
     assert (work_dir / "out" / "stage1b_summary.json").exists()
