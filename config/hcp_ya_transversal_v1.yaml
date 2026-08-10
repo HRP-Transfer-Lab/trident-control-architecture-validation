@@ -1,8 +1,8 @@
 analysis:
   id: hcp_ya_transversal_v1
-  milestone: M6_HCP_YA_transversal_K_C_V
+  milestone: M6_0a_HCP_YA_source_schema_and_construct_hardening
   status: data_support_preflight_protocol
-  question: Do lower-level K/C/V coordinates transport across attention/control, working memory and reasoning?
+  question: Do lower-level K/C_candidate/V coordinates transport across attention/control, working memory and reasoning?
   formulated_after_public_stage1_to_stage3: true
   formal_claims_allowed: false
   trident_validation_claim_allowed: false
@@ -17,6 +17,7 @@ analysis:
 inputs:
   hcp_extract_path: data/processed/hcp_ya_transversal_extract.csv
   hcp_extract_sha256: null
+  extract_schema_path: config/hcp_ya_transversal_extract_schema_v1.yaml
   participant_id_column: Subject
   family_id_column: Family_ID
   unrelated_indicator_column: null
@@ -34,20 +35,18 @@ support_thresholds:
 
 predictor_sources:
   K:
-    description: broad non-target performance/general capacity indicators; target-domain outcomes excluded by rule
+    description: broad non-target performance/general capacity indicators; excludes Flanker, Card Sort, List Sorting, 2-back, PMAT and global cognition composites
     required_min_columns: 2
     columns:
-      - NIH_Flanker_Unadj
-      - NIH_ProcSpeed_Unadj
-      - NIH_CardSort_Unadj
+      - ProcSpeed_Unadj
       - PicSeq_Unadj
       - ReadEng_Unadj
       - PicVocab_Unadj
-  C_signal:
-    description: Flanker/interference-control candidate
+  C_candidate:
+    description: Flanker inhibitory-control/attention candidate; not yet C_signal as a confirmed mechanism
     required_min_columns: 1
     columns:
-      - NIH_Flanker_Unadj
+      - Flanker_Unadj
   V:
     description: Short Penn CPT sustained-attention/readiness candidate
     required_min_columns: 1
@@ -59,14 +58,16 @@ outcome_domains:
   attention_control:
     description: held-out attention/control outcome, if an independent indicator exists
     primary: false
+    required_for_support: true
     columns:
-      - NIH_CardSort_Unadj
+      - CardSort_Unadj
     anti_circularity:
       exclude_from_K_when_target: true
       must_not_overlap_C_or_V: true
   wm_list_sorting:
     description: List Sorting working memory
     primary: true
+    required_for_support: true
     columns:
       - ListSort_Unadj
     anti_circularity:
@@ -75,14 +76,16 @@ outcome_domains:
   wm_nback:
     description: task-fMRI 2-back working-memory performance
     primary: true
+    required_for_support: true
     columns:
-      - tfMRI_WM_2bk_Acc
+      - WM_Task_2bk_Acc
     anti_circularity:
       exclude_from_K_when_target: true
       must_not_overlap_C_or_V: true
   reasoning_pmat:
     description: Penn Progressive Matrices fluid reasoning
     primary: true
+    required_for_support: true
     columns:
       - PMAT24_A_CR
     secondary_columns:
@@ -90,14 +93,23 @@ outcome_domains:
     anti_circularity:
       exclude_from_K_when_target: true
       must_not_overlap_C_or_V: true
+  reasoning_relational:
+    description: optional relational-processing behavioural performance summary, if available in local HCP export
+    primary: false
+    required_for_support: false
+    columns:
+      - Relational_Task_Acc
+    anti_circularity:
+      exclude_from_K_when_target: true
+      must_not_overlap_C_or_V: true
 
 candidate_model_sequence:
   primary_domain_models:
     - K
-    - K_plus_C_signal
+    - K_plus_C_candidate
     - K_plus_V
-    - K_plus_C_signal_plus_V
-    - K_plus_C_signal_plus_V_plus_C_by_V
+    - K_plus_C_candidate_plus_V
+    - K_plus_C_candidate_plus_V_plus_C_by_V
   coefficient_weight_comparison:
     enabled: true
     domains:
@@ -105,6 +117,7 @@ candidate_model_sequence:
       - wm_list_sorting
       - wm_nback
       - reasoning_pmat
+      - reasoning_relational
   layer_specific_residual_tests:
     enabled: true
     wm_specific_candidate_requires_independent_indicators: true

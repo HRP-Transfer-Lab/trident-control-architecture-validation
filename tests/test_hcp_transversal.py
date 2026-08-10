@@ -32,7 +32,15 @@ def test_hcp_transversal_rejects_outcome_overlap_with_c_or_v():
     config = load_yaml_config(CONFIG_PATH)
     config["outcome_domains"]["reasoning_pmat"]["columns"] = ["SCPT_SEN"]
 
-    with pytest.raises(ConfigValidationError, match="overlaps with C_signal/V"):
+    with pytest.raises(ConfigValidationError, match="overlaps with C/V"):
+        validate_hcp_transversal_config(config)
+
+
+def test_hcp_transversal_rejects_flanker_or_card_sort_inside_k():
+    config = load_yaml_config(CONFIG_PATH)
+    config["predictor_sources"]["K"]["columns"].append("Flanker_Unadj")
+
+    with pytest.raises(ConfigValidationError, match="forbidden HCP overlap"):
         validate_hcp_transversal_config(config)
 
 
@@ -60,6 +68,10 @@ def test_hcp_transversal_removes_outcome_columns_from_domain_k():
     assert result.summary["support_passed"] is True
     assert "ListSort_Unadj" not in domain_support.loc["wm_list_sorting", "k_columns_after_exclusion"].split("|")
     assert "PMAT24_A_CR" not in domain_support.loc["reasoning_pmat", "k_columns_after_exclusion"].split("|")
+    assert "Flanker_Unadj" not in domain_support.loc["wm_list_sorting", "k_columns_after_exclusion"].split("|")
+    assert "CardSort_Unadj" not in domain_support.loc["wm_list_sorting", "k_columns_after_exclusion"].split("|")
+    assert bool(domain_support.loc["reasoning_relational", "required_for_support"]) is False
+    assert bool(domain_support.loc["reasoning_relational", "support_passed"]) is False
     assert result.split_support["family_isolated_cv_feasible"] is True
     assert result.split_support["ordinary_participant_folds_allowed"] is False
     assert "participant_id" not in result.column_support.columns
@@ -121,16 +133,16 @@ def _mock_hcp_extract(n: int) -> pd.DataFrame:
         {
             "Subject": [f"S{i:04d}" for i in range(n)],
             "Family_ID": [f"F{i // 2:04d}" for i in range(n)],
-            "NIH_Flanker_Unadj": rng.normal(size=n),
-            "NIH_ProcSpeed_Unadj": rng.normal(size=n),
-            "NIH_CardSort_Unadj": rng.normal(size=n),
+            "Flanker_Unadj": rng.normal(size=n),
+            "ProcSpeed_Unadj": rng.normal(size=n),
+            "CardSort_Unadj": rng.normal(size=n),
             "PicSeq_Unadj": rng.normal(size=n),
             "ReadEng_Unadj": rng.normal(size=n),
             "PicVocab_Unadj": rng.normal(size=n),
             "SCPT_SEN": rng.normal(size=n),
             "SCPT_SPEC": rng.normal(size=n),
             "ListSort_Unadj": rng.normal(size=n),
-            "tfMRI_WM_2bk_Acc": rng.normal(size=n),
+            "WM_Task_2bk_Acc": rng.normal(size=n),
             "PMAT24_A_CR": rng.normal(size=n),
             "PMAT24_A_RTCR": rng.normal(size=n),
         }

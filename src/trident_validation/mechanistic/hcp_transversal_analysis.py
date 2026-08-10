@@ -132,7 +132,8 @@ def validate_hcp_transversal_analysis_config(config: dict[str, Any]) -> None:
 
     predictors = _required_mapping(config, "coordinate_sources")
     outcomes = _required_mapping(config, "outcome_domains")
-    cv_columns = set(_as_list(predictors["C_signal"].get("columns"))) | set(_as_list(predictors["V"].get("columns")))
+    control_key = _control_key(predictors)
+    cv_columns = set(_as_list(predictors[control_key].get("columns"))) | set(_as_list(predictors["V"].get("columns")))
     for domain, spec in outcomes.items():
         anti = _required_mapping(spec, "anti_circularity")
         if anti.get("exclude_outcome_from_K") is not True:
@@ -143,8 +144,29 @@ def validate_hcp_transversal_analysis_config(config: dict[str, Any]) -> None:
         overlap = outcome_columns.intersection(cv_columns)
         if overlap:
             raise ConfigValidationError(
-                f"{domain} outcome overlaps with C_signal/V predictors: " + ", ".join(sorted(overlap))
+                f"{domain} outcome overlaps with C/V predictors: " + ", ".join(sorted(overlap))
             )
+    k_columns = set(_as_list(predictors["K"].get("columns")))
+    forbidden_k = {
+        "Flanker_Unadj",
+        "NIH_Flanker_Unadj",
+        "CardSort_Unadj",
+        "NIH_CardSort_Unadj",
+        "ListSort_Unadj",
+        "WM_Task_2bk_Acc",
+        "tfMRI_WM_2bk_Acc",
+        "PMAT24_A_CR",
+        "PMAT24_A_RTCR",
+        "CogTotalComp_Unadj",
+        "CogTotalComp_AgeAdj",
+        "CogFluidComp_Unadj",
+        "CogFluidComp_AgeAdj",
+        "CogCrystalComp_Unadj",
+        "CogCrystalComp_AgeAdj",
+    }
+    overlap_k = k_columns.intersection(forbidden_k)
+    if overlap_k:
+        raise ConfigValidationError("K contains forbidden HCP overlap/global columns: " + ", ".join(sorted(overlap_k)))
 
     layer = _required_mapping(config, "layer_specific_residual_tests")
     if layer.get("no_outcome_reuse_for_specific_factor") is not True:
@@ -164,9 +186,10 @@ def _domain_plan(config: dict[str, Any]) -> pd.DataFrame:
             {
                 "domain": domain,
                 "primary": bool(spec.get("primary", False)),
+                "required_for_support": bool(spec.get("required_for_support", True)),
                 "outcome_columns": "|".join(sorted(outcome_columns)),
                 "k_columns_after_exclusion": "|".join(sorted(k_columns.difference(outcome_columns))),
-                "c_signal_columns": "|".join(_as_list(config["coordinate_sources"]["C_signal"]["columns"])),
+                "c_candidate_columns": "|".join(_as_list(config["coordinate_sources"][_control_key(config["coordinate_sources"])]["columns"])),
                 "v_columns": "|".join(_as_list(config["coordinate_sources"]["V"]["columns"])),
                 "anti_circularity_checked": True,
             }
@@ -242,6 +265,14 @@ def _preflight_gate_status(config: dict[str, Any], preflight: dict[str, Any] | N
     }
 
 
+def _control_key(predictors: dict[str, Any]) -> str:
+    if "C_candidate" in predictors:
+        return "C_candidate"
+    if "C_signal" in predictors:
+        return "C_signal"
+    raise ConfigValidationError("coordinate_sources must define C_candidate or C_signal")
+
+
 def _render_report(
     summary: dict[str, Any],
     domain_plan: pd.DataFrame,
@@ -270,11 +301,14 @@ def _render_report(
         "",
         "## Domain Plan",
         "",
-        "| Domain | Primary | Outcome columns | K columns after exclusion |",
-        "|---|---:|---|---|",
+        "| Domain | Primary | Required | Outcome columns | K columns after exclusion |",
+        "|---|---:|---:|---|---|",
     ]
     for row in domain_plan.itertuples(index=False):
-        lines.append(f"| {row.domain} | {str(row.primary).lower()} | {row.outcome_columns} | {row.k_columns_after_exclusion} |")
+        lines.append(
+            f"| {row.domain} | {str(row.primary).lower()} | {str(row.required_for_support).lower()} | "
+            f"{row.outcome_columns} | {row.k_columns_after_exclusion} |"
+        )
     lines.extend(
         [
             "",
@@ -307,7 +341,7 @@ def _render_report(
             "",
             "- Participant-level HCP data read by this plan: false",
             "- Ordinary participant folds allowed: false",
-            "- Outcome columns reused to construct same-domain K/C/V: false",
+            "- Outcome columns reused to construct same-domain K/C_candidate/V: false",
             "- Layer-specific residual factors registered: false",
             "- NKI replication required for stronger transport claim: true",
         ]

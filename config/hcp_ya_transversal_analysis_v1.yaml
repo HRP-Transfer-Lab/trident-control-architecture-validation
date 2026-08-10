@@ -1,8 +1,8 @@
 analysis:
   id: hcp_ya_transversal_analysis_v1
-  milestone: M6_HCP_YA_transversal_K_C_V_analysis
+  milestone: M6_HCP_YA_transversal_K_C_candidate_V_analysis
   status: locked_pending_passed_support_preflight
-  question: Can the same individual K/C/V coordinates transport across attention, working memory and reasoning while weights and layer-specific residuals vary by representational level?
+  question: Can the same individual K/C_candidate/V coordinates transport across attention, working memory and reasoning while weights and layer-specific residuals vary by representational level?
   depends_on_preflight_config: config/hcp_ya_transversal_v1.yaml
   required_preflight_status: data_support_passed_ready_to_freeze_analysis
   current_preflight_summary_path: reports/generated/hcp_ya_transversal_v1/preflight_summary.json
@@ -20,6 +20,7 @@ analysis:
 
 inputs:
   hcp_extract_path: data/processed/hcp_ya_transversal_extract.csv
+  extract_schema_path: config/hcp_ya_transversal_extract_schema_v1.yaml
   participant_level_data_in_git_allowed: false
   family_structure_policy:
     primary: family_isolated_cv
@@ -28,18 +29,16 @@ inputs:
 
 coordinate_sources:
   K:
-    description: broad non-target performance/general capacity indicators
+    description: broad non-target performance/general capacity indicators; excludes Flanker, Card Sort, List Sorting, 2-back, PMAT and global cognition composites
     columns:
-      - NIH_Flanker_Unadj
-      - NIH_ProcSpeed_Unadj
-      - NIH_CardSort_Unadj
+      - ProcSpeed_Unadj
       - PicSeq_Unadj
       - ReadEng_Unadj
       - PicVocab_Unadj
-  C_signal:
-    description: Flanker/interference-control candidate
+  C_candidate:
+    description: Flanker inhibitory-control/attention candidate; not yet C_signal as a confirmed mechanism
     columns:
-      - NIH_Flanker_Unadj
+      - Flanker_Unadj
   V:
     description: Short Penn CPT sustained-attention/readiness candidate
     columns:
@@ -49,13 +48,15 @@ coordinate_sources:
 outcome_domains:
   attention_control:
     primary: false
+    required_for_support: true
     columns:
-      - NIH_CardSort_Unadj
+      - CardSort_Unadj
     anti_circularity:
       exclude_outcome_from_K: true
       forbid_overlap_with_C_or_V: true
   wm_list_sorting:
     primary: true
+    required_for_support: true
     columns:
       - ListSort_Unadj
     anti_circularity:
@@ -63,17 +64,27 @@ outcome_domains:
       forbid_overlap_with_C_or_V: true
   wm_nback:
     primary: true
+    required_for_support: true
     columns:
-      - tfMRI_WM_2bk_Acc
+      - WM_Task_2bk_Acc
     anti_circularity:
       exclude_outcome_from_K: true
       forbid_overlap_with_C_or_V: true
   reasoning_pmat:
     primary: true
+    required_for_support: true
     columns:
       - PMAT24_A_CR
     secondary_columns:
       - PMAT24_A_RTCR
+    anti_circularity:
+      exclude_outcome_from_K: true
+      forbid_overlap_with_C_or_V: true
+  reasoning_relational:
+    primary: false
+    required_for_support: false
+    columns:
+      - Relational_Task_Acc
     anti_circularity:
       exclude_outcome_from_K: true
       forbid_overlap_with_C_or_V: true
@@ -82,25 +93,25 @@ primary_model_sequence:
   - id: K
     predictors:
       - K
-  - id: K_plus_C_signal
+  - id: K_plus_C_candidate
     predictors:
       - K
-      - C_signal
+      - C_candidate
   - id: K_plus_V
     predictors:
       - K
       - V
-  - id: K_plus_C_signal_plus_V
+  - id: K_plus_C_candidate_plus_V
     predictors:
       - K
-      - C_signal
+      - C_candidate
       - V
-  - id: K_plus_C_signal_plus_V_plus_C_by_V
+  - id: K_plus_C_candidate_plus_V_plus_C_by_V
     predictors:
       - K
-      - C_signal
+      - C_candidate
       - V
-      - C_signal_by_V
+      - C_candidate_by_V
 
 domain_weight_test:
   enabled: true
@@ -110,9 +121,10 @@ domain_weight_test:
       - wm_list_sorting
       - wm_nback
       - reasoning_pmat
+      - reasoning_relational
     columns:
       - K
-      - C_signal
+      - C_candidate
       - V
   interpretation_boundary: coefficient differences are domain-demand diagnostics, not mechanism validation
 
@@ -123,7 +135,8 @@ layer_specific_residual_tests:
     candidate_indicators: []
   reasoning_specific:
     status: blocked_until_independent_indicators_registered
-    candidate_indicators: []
+    candidate_indicators:
+      - Relational_Task_Acc
   no_outcome_reuse_for_specific_factor: true
 
 validation:

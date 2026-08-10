@@ -1,10 +1,10 @@
 # M6 HCP-YA Transversal Extract Request
 
-**Status:** local data-preparation request
+**Status:** M6.0a source-schema and construct-hardened local data-preparation request
 
 This document defines the participant-level HCP-YA behavioural extract needed
-for the transversal K/C/V support preflight. It does not contain participant
-data and does not authorise model fitting.
+for the transversal K/C_candidate/V support preflight. It does not contain
+participant data and does not authorise model fitting.
 
 Participant-level HCP data must not be committed to Git.
 
@@ -32,26 +32,38 @@ amended before fitting so the unrelated-only safeguard is explicit.
 
 Ordinary random participant folds are not allowed.
 
-## Required Behavioural Columns
+## Required HCP Source Columns
 
 ```text
-NIH_Flanker_Unadj
-NIH_ProcSpeed_Unadj
-NIH_CardSort_Unadj
+Flanker_Unadj
+ProcSpeed_Unadj
+CardSort_Unadj
 PicSeq_Unadj
 ReadEng_Unadj
 PicVocab_Unadj
 SCPT_SEN
 SCPT_SPEC
 ListSort_Unadj
-tfMRI_WM_2bk_Acc
+WM_Task_2bk_Acc
 PMAT24_A_CR
 PMAT24_A_RTCR
 ```
 
-If the local HCP export uses different names, rename into these canonical
-extract names before running the repository preflight, or update the config in
-a separate schema-mapping commit before outcome fitting.
+The schema records both `hcp_source_column` and `canonical_column` in:
+
+```text
+config/hcp_ya_transversal_extract_schema_v1.yaml
+```
+
+If the local HCP export uses a different source name for a registered construct,
+update the source mapping in a separate pre-outcome schema commit before
+outcome fitting. Do not manually rename after inspecting outcome associations.
+
+Optional, non-blocking relational-processing behavioural column if available:
+
+```text
+Relational_Task_Acc
+```
 
 ## Construct Boundary
 
@@ -59,18 +71,34 @@ The extract supports:
 
 ```text
 K: broad non-target/general performance candidates
-C_signal: Flanker/interference-control candidate
+C_candidate: Flanker inhibitory-control/attention candidate
 V: Short Penn CPT sustained-attention candidate
 ```
+
+Primary K is deliberately limited to:
+
+```text
+ProcSpeed_Unadj
+PicSeq_Unadj
+ReadEng_Unadj
+PicVocab_Unadj
+```
+
+Do not include Flanker, Card Sort, List Sorting, 2-back, PMAT or HCP global
+cognition composites such as CogTotalComp in K.
+
+The HCP Flanker variable is a behavioural `C_candidate`, not a confirmed
+`C_signal` mechanism.
 
 Held-out outcomes:
 
 ```text
-attention/control: NIH_CardSort_Unadj
+attention/control: CardSort_Unadj
 working memory: ListSort_Unadj
-working memory: tfMRI_WM_2bk_Acc
+working memory: WM_Task_2bk_Acc
 reasoning: PMAT24_A_CR
 reasoning secondary RT: PMAT24_A_RTCR
+reasoning/relational optional: Relational_Task_Acc
 ```
 
 The anti-circularity rule is hard:

@@ -15,6 +15,10 @@ from typing import Any
 import pandas as pd
 
 from trident_validation.config import ConfigValidationError, load_yaml_config
+from trident_validation.mechanistic.hcp_extract_schema import (
+    canonicalize_hcp_extract_columns,
+    load_hcp_extract_schema,
+)
 from trident_validation.provenance import get_git_commit, hash_file, hash_mapping
 
 
@@ -68,12 +72,22 @@ def run_hcp_transversal_preflight(
         )
 
     data = _read_table(extract_path)
+    schema_path = config["inputs"].get("extract_schema_path")
+    if schema_path:
+        schema = load_hcp_extract_schema(schema_path, repo_root=root)
+        data = canonicalize_hcp_extract_columns(data, schema)
     column_support = _column_support(data, config)
     domain_support = _domain_support(data, config)
     split_support = _split_support(data, config)
+    required_domain_support = domain_support.loc[
+        domain_support["required_for_support"].astype(bool), "support_passed"
+    ]
+    required_column_support = column_support.loc[
+        column_support["required_for_support"].astype(bool), "available"
+    ]
     support_passed = bool(
-        column_support["available"].all()
-        and domain_support["support_passed"].all()
+        required_column_support.all()
+        and required_domain_support.all()
         and (split_support["family_isolated_cv_feasible"] or split_support["unrelated_only_feasible"])
         and not split_support["ordinary_participant_folds_allowed"]
     )
@@ -138,6 +152,7 @@ def validate_hcp_transversal_config(config: dict[str, Any]) -> None:
 
     predictors = _required_mapping(config, "predictor_sources")
     outcomes = _required_mapping(config, "outcome_domains")
+    control_key = _control_key(predictors)
     predictor_columns = {
         variable: set(_as_list(spec.get("columns")))
         for variable, spec in predictors.items()
@@ -149,11 +164,32 @@ def validate_hcp_transversal_config(config: dict[str, Any]) -> None:
             raise ConfigValidationError(f"{domain} must exclude outcome columns from K when target")
         if anti.get("must_not_overlap_C_or_V") is not True:
             raise ConfigValidationError(f"{domain} must forbid C/V outcome overlap")
-        overlap_cv = outcome_columns.intersection(predictor_columns.get("C_signal", set()) | predictor_columns.get("V", set()))
+        overlap_cv = outcome_columns.intersection(predictor_columns.get(control_key, set()) | predictor_columns.get("V", set()))
         if overlap_cv:
             raise ConfigValidationError(
-                f"{domain} outcome overlaps with C_signal/V predictors: " + ", ".join(sorted(overlap_cv))
+                f"{domain} outcome overlaps with C/V predictors: " + ", ".join(sorted(overlap_cv))
             )
+    k_columns = set(_as_list(predictors["K"].get("columns")))
+    forbidden_k = {
+        "Flanker_Unadj",
+        "NIH_Flanker_Unadj",
+        "CardSort_Unadj",
+        "NIH_CardSort_Unadj",
+        "ListSort_Unadj",
+        "WM_Task_2bk_Acc",
+        "tfMRI_WM_2bk_Acc",
+        "PMAT24_A_CR",
+        "PMAT24_A_RTCR",
+        "CogTotalComp_Unadj",
+        "CogTotalComp_AgeAdj",
+        "CogFluidComp_Unadj",
+        "CogFluidComp_AgeAdj",
+        "CogCrystalComp_Unadj",
+        "CogCrystalComp_AgeAdj",
+    }
+    overlap_k = k_columns.intersection(forbidden_k)
+    if overlap_k:
+        raise ConfigValidationError("K contains forbidden HCP overlap/global columns: " + ", ".join(sorted(overlap_k)))
     decision = _required_mapping(config, "decision_boundary")
     if decision.get("model_fitting_allowed_by_this_config") is not False:
         raise ConfigValidationError("this config must not authorise model fitting")
@@ -162,22 +198,23 @@ def validate_hcp_transversal_config(config: dict[str, Any]) -> None:
 def _column_support(data: pd.DataFrame, config: dict[str, Any]) -> pd.DataFrame:
     roles: list[dict[str, Any]] = []
     participant_column = config["inputs"]["participant_id_column"]
-    roles.append(_column_row("identity", "participant_id", participant_column, data))
+    roles.append(_column_row("identity", "participant_id", participant_column, data, required_for_support=True))
     family_column = config["inputs"].get("family_id_column")
     if family_column:
-        roles.append(_column_row("identity", "family_id", family_column, data))
+        roles.append(_column_row("identity", "family_id", family_column, data, required_for_support=True))
     unrelated_column = config["inputs"].get("unrelated_indicator_column")
     if unrelated_column:
-        roles.append(_column_row("identity", "unrelated_indicator", unrelated_column, data))
+        roles.append(_column_row("identity", "unrelated_indicator", unrelated_column, data, required_for_support=True))
 
     for variable, spec in config["predictor_sources"].items():
         for column in _as_list(spec.get("columns")):
-            roles.append(_column_row("predictor", variable, column, data))
+            roles.append(_column_row("predictor", variable, column, data, required_for_support=True))
     for domain, spec in config["outcome_domains"].items():
+        required = bool(spec.get("required_for_support", True))
         for column in _as_list(spec.get("columns")):
-            roles.append(_column_row("outcome", domain, column, data))
+            roles.append(_column_row("outcome", domain, column, data, required_for_support=required))
         for column in _as_list(spec.get("secondary_columns")):
-            roles.append(_column_row("secondary_outcome", domain, column, data))
+            roles.append(_column_row("secondary_outcome", domain, column, data, required_for_support=required))
     return pd.DataFrame(roles)
 
 
@@ -191,7 +228,7 @@ def _domain_support(data: pd.DataFrame, config: dict[str, Any]) -> pd.DataFrame:
         required_columns = (
             [participant_col]
             + k_columns
-            + _as_list(config["predictor_sources"]["C_signal"]["columns"])
+            + _as_list(config["predictor_sources"][_control_key(config["predictor_sources"])]["columns"])
             + _as_list(config["predictor_sources"]["V"]["columns"])
             + outcome_columns
         )
@@ -201,6 +238,7 @@ def _domain_support(data: pd.DataFrame, config: dict[str, Any]) -> pd.DataFrame:
             {
                 "domain": domain,
                 "primary": bool(spec.get("primary", False)),
+                "required_for_support": bool(spec.get("required_for_support", True)),
                 "outcome_columns": "|".join(outcome_columns),
                 "k_columns_after_exclusion": "|".join(k_columns),
                 "required_columns": "|".join(required_columns),
@@ -259,6 +297,14 @@ def _domain_k_columns(config: dict[str, Any], domain: str) -> list[str]:
     return sorted(k_columns.difference(outcome_columns))
 
 
+def _control_key(predictors: dict[str, Any]) -> str:
+    if "C_candidate" in predictors:
+        return "C_candidate"
+    if "C_signal" in predictors:
+        return "C_signal"
+    raise ConfigValidationError("predictor_sources must define C_candidate or C_signal")
+
+
 def _missing_data_summary(
     config: dict[str, Any],
     config_file: Path,
@@ -287,7 +333,7 @@ def _render_report(
     split_support: dict[str, Any],
 ) -> str:
     lines = [
-        "# M6 HCP-YA Transversal K/C/V Preflight",
+        "# M6 HCP-YA Transversal K/C Candidate/V Preflight",
         "",
         "**Status:** data-support preflight only",
         "",
@@ -297,7 +343,7 @@ def _render_report(
         "",
         "## Question",
         "",
-        "Do lower-level K/C/V coordinates transport across attention/control, working memory and reasoning?",
+        "Do lower-level K/C_candidate/V coordinates transport across attention/control, working memory and reasoning?",
         "",
         "## Summary",
         "",
@@ -323,25 +369,29 @@ def _render_report(
             [
                 "## Column Support",
                 "",
-                "| Role | Variable/domain | Column | Available | Nonmissing |",
-                "|---|---|---|---:|---:|",
+                "| Role | Variable/domain | Column | Required | Available | Nonmissing |",
+                "|---|---|---|---:|---:|---:|",
             ]
         )
         for row in column_support.itertuples(index=False):
-            lines.append(f"| {row.role} | {row.variable_or_domain} | {row.column} | {str(row.available).lower()} | {row.nonmissing} |")
+            lines.append(
+                f"| {row.role} | {row.variable_or_domain} | {row.column} | "
+                f"{str(row.required_for_support).lower()} | {str(row.available).lower()} | {row.nonmissing} |"
+            )
         lines.append("")
     if not domain_support.empty:
         lines.extend(
             [
                 "## Domain Support",
                 "",
-                "| Domain | Primary | Complete participants | Missing columns | Support passed |",
-                "|---|---:|---:|---|---:|",
+                "| Domain | Primary | Required | Complete participants | Missing columns | Support passed |",
+                "|---|---:|---:|---:|---|---:|",
             ]
         )
         for row in domain_support.itertuples(index=False):
             lines.append(
-                f"| {row.domain} | {str(row.primary).lower()} | {row.complete_participants} | "
+                f"| {row.domain} | {str(row.primary).lower()} | {str(row.required_for_support).lower()} | "
+                f"{row.complete_participants} | "
                 f"{row.missing_columns or 'none'} | {str(row.support_passed).lower()} |"
             )
         lines.append("")
@@ -350,7 +400,7 @@ def _render_report(
             "## Boundary",
             "",
             "- Participant-level HCP data in Git: false",
-            "- Outcome columns reused to construct same-domain K/C/V: false by config validation",
+            "- Outcome columns reused to construct same-domain K/C_candidate/V: false by config validation",
             "- Model outcomes interpreted: false",
             "- Stage 1-3 reports changed: false",
         ]
@@ -390,11 +440,19 @@ def _read_table(path: Path) -> pd.DataFrame:
     raise ConfigValidationError(f"unsupported HCP extract extension: {path.suffix}")
 
 
-def _column_row(role: str, variable_or_domain: str, column: str, data: pd.DataFrame) -> dict[str, Any]:
+def _column_row(
+    role: str,
+    variable_or_domain: str,
+    column: str,
+    data: pd.DataFrame,
+    *,
+    required_for_support: bool,
+) -> dict[str, Any]:
     return {
         "role": role,
         "variable_or_domain": variable_or_domain,
         "column": column,
+        "required_for_support": required_for_support,
         "available": column in data.columns,
         "nonmissing": int(data[column].notna().sum()) if column in data.columns else 0,
     }

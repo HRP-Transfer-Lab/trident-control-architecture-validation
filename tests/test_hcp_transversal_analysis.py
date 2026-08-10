@@ -40,7 +40,15 @@ def test_hcp_transversal_analysis_rejects_outcome_overlap_with_c_or_v():
     config = load_yaml_config(CONFIG_PATH)
     config["outcome_domains"]["wm_list_sorting"]["columns"] = ["SCPT_SPEC"]
 
-    with pytest.raises(ConfigValidationError, match="overlaps with C_signal/V"):
+    with pytest.raises(ConfigValidationError, match="overlaps with C/V"):
+        validate_hcp_transversal_analysis_config(config)
+
+
+def test_hcp_transversal_analysis_rejects_global_or_overlap_k_columns():
+    config = load_yaml_config(CONFIG_PATH)
+    config["coordinate_sources"]["K"]["columns"].append("CogTotalComp_Unadj")
+
+    with pytest.raises(ConfigValidationError, match="forbidden HCP overlap"):
         validate_hcp_transversal_analysis_config(config)
 
 
@@ -95,11 +103,14 @@ def test_hcp_transversal_analysis_plan_ready_after_mock_passed_preflight():
     assert result.summary["requires_later_analysis_freeze_commit"] is True
     assert "ListSort_Unadj" not in domain_plan.loc["wm_list_sorting", "k_columns_after_exclusion"].split("|")
     assert "PMAT24_A_CR" not in domain_plan.loc["reasoning_pmat", "k_columns_after_exclusion"].split("|")
+    assert "Flanker_Unadj" not in domain_plan.loc["wm_list_sorting", "k_columns_after_exclusion"].split("|")
+    assert "CardSort_Unadj" not in domain_plan.loc["wm_list_sorting", "k_columns_after_exclusion"].split("|")
+    assert bool(domain_plan.loc["reasoning_relational", "required_for_support"]) is False
     assert set(result.model_plan["model_id"]) == {
         "K",
-        "K_plus_C_signal",
+        "K_plus_C_candidate",
         "K_plus_V",
-        "K_plus_C_signal_plus_V",
-        "K_plus_C_signal_plus_V_plus_C_by_V",
+        "K_plus_C_candidate_plus_V",
+        "K_plus_C_candidate_plus_V_plus_C_by_V",
     }
     assert result.layer_specific_plan["outcome_reuse_allowed"].eq(False).all()

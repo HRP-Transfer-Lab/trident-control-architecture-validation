@@ -1,6 +1,6 @@
-# M6 HCP-YA Transversal Analysis Protocol V1
+# M6 HCP-YA Transversal K/C Candidate/V Analysis Protocol V1
 
-**Status:** locked pending passed support preflight
+**Status:** locked pending passed support preflight; M6.0a source-schema and construct hardened
 
 This is the post-preflight analysis scaffold for the HCP-YA transversal K/C/V
 test. It does not authorise model fitting yet.
@@ -11,7 +11,7 @@ dynamic-regime, neural-criticality or cusp claim is authorised.
 ## Target Question
 
 ```text
-Can the same individual K/C/V coordinates transport across attention,
+Can the same individual K/C_candidate/V coordinates transport across attention,
 working memory and reasoning, while allowing the relative contribution of each
 coordinate and genuinely layer-specific residual capacity to change with
 representational level?
@@ -41,10 +41,10 @@ For each supported domain `Y`, fit the prospective sequence:
 
 ```text
 Y ~ K
-Y ~ K + C_signal
+Y ~ K + C_candidate
 Y ~ K + V
-Y ~ K + C_signal + V
-Y ~ K + C_signal + V + C_signal x V
+Y ~ K + C_candidate + V
+Y ~ K + C_candidate + V + C_candidate x V
 ```
 
 Primary score:
@@ -65,16 +65,19 @@ Examples:
 ```text
 List Sorting cannot enter K when List Sorting is the WM outcome.
 PMAT cannot enter K when PMAT is the reasoning outcome.
+Flanker cannot enter K because it defines C_candidate.
+Card Sort cannot enter K because it is the held-out attention/control target.
+HCP global cognition composites cannot enter K.
 ```
 
-Outcome columns are also forbidden from overlapping with `C_signal` or `V`.
+Outcome columns are also forbidden from overlapping with `C_candidate` or `V`.
 
 ## Domain Weight Test
 
 If the primary transport analysis is run, report domain-specific coefficients:
 
 ```text
-Y_domain = alpha_domain K + beta_domain C_signal + gamma_domain V + error
+Y_domain = alpha_domain K + beta_domain C_candidate + gamma_domain V + error
 ```
 
 This tests whether the K/C/V mixture changes by representational level. It is
@@ -85,15 +88,18 @@ not a mechanism-validation claim.
 Layer-specific tests are gated after primary transport:
 
 ```text
-WM ~ K + C + V
-WM ~ K + C + V + W_specific
+WM ~ K + C_candidate + V
+WM ~ K + C_candidate + V + W_specific
 
-Reasoning ~ K + C + V
-Reasoning ~ K + C + V + R_specific
+Reasoning ~ K + C_candidate + V
+Reasoning ~ K + C_candidate + V + R_specific
 ```
 
 `W_specific` and `R_specific` remain blocked until independent indicators are
 registered. The target outcome itself cannot define the layer-specific factor.
+The optional HCP relational-processing behavioural summary is preflighted as a
+candidate independent reasoning/relational indicator if available; it is not
+required for the primary support gate.
 
 ## Interpretation Boundary
 

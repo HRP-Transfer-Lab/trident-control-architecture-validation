@@ -23,6 +23,7 @@ class HCPExtractSchema:
     schema_id: str
     target_path: Path
     columns: tuple[str, ...]
+    source_to_canonical: dict[str, str]
     participant_level_data_in_git_allowed: bool
     model_fitting_allowed: bool
 
@@ -54,12 +55,17 @@ def validate_hcp_extract_schema(config: dict[str, Any], *, repo_root: str | Path
         raise ConfigValidationError("schema must not authorise model fitting")
 
     columns: list[str] = []
-    columns.extend(_mapping_keys(config["identity"]["required"]))
-    columns.extend(_mapping_keys(config["identity"].get("optional", {})))
-    for variable in ("K", "C_signal", "V"):
-        columns.extend(_mapping_keys(config["predictor_candidates"][variable]["columns"]))
-    for domain in ("attention_control", "wm_list_sorting", "wm_nback", "reasoning_pmat"):
-        columns.extend(_mapping_keys(config["heldout_outcomes"][domain]["columns"]))
+    source_to_canonical: dict[str, str] = {}
+    for spec in _required_mapping(config, "identity").get("required", {}).values():
+        _append_mapping_column(columns, source_to_canonical, spec)
+    for spec in config["identity"].get("optional", {}).values():
+        _append_mapping_column(columns, source_to_canonical, spec)
+    for group in _required_mapping(config, "predictor_candidates").values():
+        for spec in _required_mapping(group, "columns").values():
+            _append_mapping_column(columns, source_to_canonical, spec)
+    for group in _required_mapping(config, "heldout_outcomes").values():
+        for spec in _required_mapping(group, "columns").values():
+            _append_mapping_column(columns, source_to_canonical, spec)
 
     deduped = tuple(dict.fromkeys(columns))
     if len(deduped) != len(set(deduped)):
@@ -69,6 +75,9 @@ def validate_hcp_extract_schema(config: dict[str, Any], *, repo_root: str | Path
         "outcome_column_must_not_define_same_domain_predictor",
         "list_sorting_excluded_from_K_when_wm_outcome",
         "pmat_excluded_from_K_when_reasoning_outcome",
+        "flanker_excluded_from_K",
+        "card_sort_excluded_from_K",
+        "global_cognition_composites_forbidden_in_K",
         "c_signal_and_v_must_not_overlap_heldout_outcomes",
     ):
         if anti.get(field) is not True:
@@ -80,6 +89,7 @@ def validate_hcp_extract_schema(config: dict[str, Any], *, repo_root: str | Path
         schema_id=str(schema["id"]),
         target_path=_resolve_repo_path(Path(repo_root), str(schema["target_path"])),
         columns=deduped,
+        source_to_canonical=source_to_canonical,
         participant_level_data_in_git_allowed=False,
         model_fitting_allowed=False,
     )
@@ -105,6 +115,20 @@ def write_empty_extract_template(schema: HCPExtractSchema, *, force: bool = Fals
     return path
 
 
+def canonicalize_hcp_extract_columns(data: pd.DataFrame, schema: HCPExtractSchema) -> pd.DataFrame:
+    """Return data with recognised HCP source columns renamed to canonical columns."""
+
+    rename: dict[str, str] = {}
+    for source, canonical in schema.source_to_canonical.items():
+        if source == canonical:
+            continue
+        if source in data.columns and canonical not in data.columns:
+            rename[source] = canonical
+    if not rename:
+        return data
+    return data.rename(columns=rename)
+
+
 def _required_mapping(config: dict[str, Any], key: str) -> dict[str, Any]:
     value = config.get(key)
     if not isinstance(value, dict) or not value:
@@ -116,6 +140,21 @@ def _mapping_keys(value: dict[str, Any]) -> list[str]:
     if not isinstance(value, dict):
         raise ConfigValidationError("schema section must be a mapping")
     return [str(key) for key in value.keys()]
+
+
+def _append_mapping_column(
+    columns: list[str],
+    source_to_canonical: dict[str, str],
+    spec: Any,
+) -> None:
+    if not isinstance(spec, dict):
+        raise ConfigValidationError("schema column specification must be a mapping")
+    source = spec.get("hcp_source_column")
+    canonical = spec.get("canonical_column")
+    if not source or not canonical:
+        raise ConfigValidationError("each HCP schema column requires hcp_source_column and canonical_column")
+    source_to_canonical[str(source)] = str(canonical)
+    columns.append(str(canonical))
 
 
 def _resolve_repo_path(root: Path, value: str) -> Path:

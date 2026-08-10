@@ -24,6 +24,8 @@ def test_hcp_extract_schema_is_claim_bounded_and_ordered():
     assert schema.columns[:2] == ("Subject", "Family_ID")
     assert "ListSort_Unadj" in schema.columns
     assert "PMAT24_A_CR" in schema.columns
+    assert "NIH_Flanker_Unadj" not in schema.columns
+    assert schema.source_to_canonical["Flanker_Unadj"] == "Flanker_Unadj"
     assert len(schema.columns) == len(set(schema.columns))
 
 
@@ -42,7 +44,7 @@ def test_hcp_extract_template_writes_empty_header_only():
     config["schema"]["target_path"] = str(work_dir / "hcp_template.csv")
     schema = validate_hcp_extract_schema(config, repo_root=ROOT)
 
-    path = write_empty_extract_template(schema)
+    path = write_empty_extract_template(schema, force=True)
     written = pd.read_csv(path)
 
     assert tuple(written.columns) == schema.columns

@@ -1,6 +1,6 @@
-# M6 HCP-YA Transversal K/C/V Protocol V1
+# M6 HCP-YA Transversal K/C Candidate/V Protocol V1
 
-**Status:** data-support preflight protocol
+**Status:** M6.0a source-schema and construct-hardened data-support preflight protocol
 
 This protocol implements the next empirical strategy after the paired
 Stroop/Flanker/SART public analyses. It does not fit HCP models yet.
@@ -11,15 +11,15 @@ dynamic-regime, neural-criticality or cusp claim is authorised.
 ## Question
 
 ```text
-Are K/C/V genuinely transversal constraints on cognition, or are they mostly
+Are K/C_candidate/V genuinely transversal constraints on cognition, or are they mostly
 features of attention/control tasks?
 ```
 
 The first HCP-YA test separates two questions:
 
-1. Do the same lower-level K/C/V coordinates predict different levels of the
+1. Do the same lower-level K/C_candidate/V coordinates predict different levels of the
    stack?
-2. Do the weights of K/C/V change across attention/control, working memory and
+2. Do the weights of K/C_candidate/V change across attention/control, working memory and
    reasoning outcomes?
 
 ## Lower-Level Coordinates
@@ -28,11 +28,16 @@ The lower-level predictors are:
 
 ```text
 K = broad non-target performance/general capacity indicators
-C_signal = Flanker/interference-control candidate
+C_candidate = Flanker inhibitory-control/attention candidate
 V = sustained-attention/CPT candidate
 ```
 
 These remain behavioural predictors, not validated Trident-G/APC variables.
+The HCP Flanker score is not called confirmed `C_signal` in this protocol.
+Flanker is reserved for `C_candidate` and does not enter K.
+
+Primary K excludes Flanker, Card Sort, List Sorting, 2-back, PMAT and HCP global
+cognition composites such as CogTotalComp.
 
 ## Held-Out Outcomes
 
@@ -43,12 +48,13 @@ attention/control
 working memory: List Sorting
 working memory: 2-back task performance
 reasoning: PMAT
+reasoning/relational optional: relational-processing behavioural summary, if available
 ```
 
 The anti-circularity rule is hard:
 
 ```text
-an outcome column must not be used to construct K/C/V for that same outcome
+an outcome column must not be used to construct K/C_candidate/V for that same outcome
 ```
 
 List Sorting cannot enter K if List Sorting is the WM outcome. PMAT cannot
@@ -61,10 +67,10 @@ For each supported domain `Y`, the prospective model sequence is:
 
 ```text
 Y ~ K
-Y ~ K + C_signal
+Y ~ K + C_candidate
 Y ~ K + V
-Y ~ K + C_signal + V
-Y ~ K + C_signal + V + C_signal x V
+Y ~ K + C_candidate + V
+Y ~ K + C_candidate + V + C_candidate x V
 ```
 
 The primary score remains participant-isolated or family-isolated held-out
@@ -73,10 +79,10 @@ predictive log density.
 ## Domain Weight Test
 
 If the data-support gate passes, the analysis will report whether coefficients
-for K/C/V differ by domain:
+for K/C_candidate/V differ by domain:
 
 ```text
-Y_domain = alpha_domain K + beta_domain C_signal + gamma_domain V + error
+Y_domain = alpha_domain K + beta_domain C_candidate + gamma_domain V + error
 ```
 
 This is a transversal-weight test. It is not a claim that K/C/V are proven
@@ -88,11 +94,11 @@ Only after K/C/V domain prediction is evaluated, layer-specific terms may be
 tested:
 
 ```text
-WM ~ K + C + V
-WM ~ K + C + V + W_specific
+WM ~ K + C_candidate + V
+WM ~ K + C_candidate + V + W_specific
 
-Reasoning ~ K + C + V
-Reasoning ~ K + C + V + R_specific
+Reasoning ~ K + C_candidate + V
+Reasoning ~ K + C_candidate + V + R_specific
 ```
 
 `W_specific` and `R_specific` require independent indicators. The outcome
@@ -137,6 +143,7 @@ python -m trident_validation.mechanistic.hcp_transversal \
 The runner currently performs data-support preflight only:
 
 - verifies source availability and checksum when registered;
+- canonicalises registered HCP source columns before support checks;
 - checks required predictor/outcome columns;
 - enforces anti-circularity between predictors and outcomes;
 - checks unrelated/family-isolated validation feasibility;
