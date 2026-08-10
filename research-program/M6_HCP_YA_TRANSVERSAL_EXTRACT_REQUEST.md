@@ -121,6 +121,27 @@ python -m trident_validation.mechanistic.hcp_extract_schema `
 
 Then populate the local file from authorised HCP-YA data access.
 
+## Canonical Build Command
+
+After downloading an authorised local HCP-YA behavioural CSV/TSV/Parquet export,
+build the canonical ignored extract without manual renaming:
+
+```powershell
+$env:PYTHONPATH='src'
+
+python -m trident_validation.mechanistic.hcp_extract_builder `
+  --source path\to\authorised_hcp_export.csv `
+  --schema config/hcp_ya_transversal_extract_schema_v1.yaml `
+  --output data/processed/hcp_ya_transversal_extract.csv `
+  --summary reports/generated/hcp_ya_transversal_v1/extract_build_summary.json `
+  --force
+```
+
+The builder writes only registered canonical columns, refuses missing required
+source columns, fills absent optional columns as empty, and writes a
+participant-free build summary. The output CSV remains local/ignored and must
+not be committed.
+
 ## Preflight Command
 
 After populating the local extract:

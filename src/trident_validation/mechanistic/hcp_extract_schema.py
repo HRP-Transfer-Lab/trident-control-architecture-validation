@@ -23,6 +23,8 @@ class HCPExtractSchema:
     schema_id: str
     target_path: Path
     columns: tuple[str, ...]
+    required_columns: tuple[str, ...]
+    optional_columns: tuple[str, ...]
     source_to_canonical: dict[str, str]
     participant_level_data_in_git_allowed: bool
     model_fitting_allowed: bool
@@ -55,17 +57,20 @@ def validate_hcp_extract_schema(config: dict[str, Any], *, repo_root: str | Path
         raise ConfigValidationError("schema must not authorise model fitting")
 
     columns: list[str] = []
+    required_columns: list[str] = []
+    optional_columns: list[str] = []
     source_to_canonical: dict[str, str] = {}
     for spec in _required_mapping(config, "identity").get("required", {}).values():
-        _append_mapping_column(columns, source_to_canonical, spec)
+        _append_mapping_column(columns, required_columns, source_to_canonical, spec)
     for spec in config["identity"].get("optional", {}).values():
-        _append_mapping_column(columns, source_to_canonical, spec)
+        _append_mapping_column(columns, optional_columns, source_to_canonical, spec)
     for group in _required_mapping(config, "predictor_candidates").values():
         for spec in _required_mapping(group, "columns").values():
-            _append_mapping_column(columns, source_to_canonical, spec)
+            _append_mapping_column(columns, required_columns, source_to_canonical, spec)
     for group in _required_mapping(config, "heldout_outcomes").values():
+        destination = required_columns if bool(group.get("required_for_support", True)) else optional_columns
         for spec in _required_mapping(group, "columns").values():
-            _append_mapping_column(columns, source_to_canonical, spec)
+            _append_mapping_column(columns, destination, source_to_canonical, spec)
 
     deduped = tuple(dict.fromkeys(columns))
     if len(deduped) != len(set(deduped)):
@@ -89,6 +94,8 @@ def validate_hcp_extract_schema(config: dict[str, Any], *, repo_root: str | Path
         schema_id=str(schema["id"]),
         target_path=_resolve_repo_path(Path(repo_root), str(schema["target_path"])),
         columns=deduped,
+        required_columns=tuple(dict.fromkeys(required_columns)),
+        optional_columns=tuple(dict.fromkeys(optional_columns)),
         source_to_canonical=source_to_canonical,
         participant_level_data_in_git_allowed=False,
         model_fitting_allowed=False,
@@ -144,6 +151,7 @@ def _mapping_keys(value: dict[str, Any]) -> list[str]:
 
 def _append_mapping_column(
     columns: list[str],
+    destination: list[str],
     source_to_canonical: dict[str, str],
     spec: Any,
 ) -> None:
@@ -155,6 +163,7 @@ def _append_mapping_column(
         raise ConfigValidationError("each HCP schema column requires hcp_source_column and canonical_column")
     source_to_canonical[str(source)] = str(canonical)
     columns.append(str(canonical))
+    destination.append(str(canonical))
 
 
 def _resolve_repo_path(root: Path, value: str) -> Path:
