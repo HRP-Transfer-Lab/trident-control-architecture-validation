@@ -1,11 +1,14 @@
 analysis:
   id: hcp_ya_transversal_analysis_v1
-  milestone: M6_HCP_YA_transversal_K_C_candidate_V_analysis
-  status: locked_pending_passed_support_preflight
-  question: Can the same individual K/C_candidate/V coordinates transport across attention, working memory and reasoning while weights and layer-specific residuals vary by representational level?
+  milestone: M6_1_HCP_YA_transversal_K_C_candidate_V_analysis
+  status: m6_1_pre_outcome_frozen_analysis_protocol
+  question: Do the same lower-level K/C_candidate/V coordinates provide out-of-sample predictive information across working memory and fluid reasoning, with attention/control as a secondary near-domain comparison?
+  exploratory_external_data_test: true
+  n100_boundary_required: true
   depends_on_preflight_config: config/hcp_ya_transversal_v1.yaml
   required_preflight_status: data_support_passed_ready_to_freeze_analysis
   current_preflight_summary_path: reports/generated/hcp_ya_transversal_v1/preflight_summary.json
+  support_preflight_commit: 3cea14fd83348c413e81a861821073d1b455ce2f
   formal_claims_allowed: false
   trident_validation_claim_allowed: false
   transfer_outcomes_allowed: false
@@ -15,155 +18,237 @@ analysis:
   cusp_claim_allowed: false
   predictive_calibration_claim_allowed: false
   t_commit_claim_allowed: false
-  model_fitting_enabled: false
-  requires_later_analysis_freeze_commit: true
+  confirmed_g_claim_allowed: false
+  confirmed_c_signal_claim_allowed: false
+  confirmed_v_mechanism_claim_allowed: false
+  model_fitting_enabled: true
+  requires_pre_outcome_freeze_commit: true
 
 inputs:
   hcp_extract_path: data/processed/hcp_ya_transversal_extract.csv
   extract_schema_path: config/hcp_ya_transversal_extract_schema_v1.yaml
+  participant_id_column: Subject
+  expected_n_subjects: 100
+  cohort_mode: hcp_100_unrelated
+  cohort_provenance:
+    official_hcp_100_unrelated_subjects_group_declared: true
+    official_group_name: HCP 100 Unrelated Subjects
+    access_route: ConnectomeDB powered by BALSA
+    exported_from_official_group: true
+  family_id_column: null
   participant_level_data_in_git_allowed: false
   family_structure_policy:
-    primary: family_isolated_cv
-    fallback_if_no_restricted_family_access: unrelated_only_sample
+    primary: participant_isolated_official_hcp_100_unrelated
+    family_id_required_for_full_or_arbitrary_hcp: true
     ordinary_participant_folds_allowed: false
 
-coordinate_sources:
-  K:
-    description: broad non-target performance/general capacity indicators; excludes Flanker, Card Sort, List Sorting, 2-back, PMAT and global cognition composites
+constructs:
+  K_candidate:
+    label: broad general-capacity / g-like candidate
     columns:
       - ProcSpeed_Unadj
       - PicSeq_Unadj
       - ReadEng_Unadj
       - PicVocab_Unadj
+    standardisation: training_fold_mean_sd
+    orientation: higher_is_better
+    aggregation: unweighted_arithmetic_mean_after_training_fold_standardisation
+    fitted_indicator_weights_allowed: false
   C_candidate:
-    description: Flanker inhibitory-control/attention candidate; not yet C_signal as a confirmed mechanism
+    label: Flanker inhibitory-control/attention candidate
     columns:
       - Flanker_Unadj
-  V:
-    description: Short Penn CPT sustained-attention/readiness candidate
+    standardisation: training_fold_mean_sd
+    orientation: higher_is_better
+    confirmed_c_signal_claim_allowed: false
+  V_candidate:
+    label: sustained-attention/vigilance-readiness candidate
     columns:
       - SCPT_SEN
       - SCPT_SPEC
+    standardisation: training_fold_mean_sd
+    orientation: higher_is_better
+    aggregation: unweighted_arithmetic_mean_after_training_fold_standardisation
+    fitted_indicator_weights_allowed: false
 
 outcome_domains:
-  attention_control:
-    primary: false
-    required_for_support: true
-    columns:
-      - CardSort_Unadj
-    anti_circularity:
-      exclude_outcome_from_K: true
-      forbid_overlap_with_C_or_V: true
   wm_list_sorting:
+    role: primary
     primary: true
-    required_for_support: true
+    analysis_eligible: true
+    description: List Sorting working-memory outcome
     columns:
       - ListSort_Unadj
     anti_circularity:
       exclude_outcome_from_K: true
       forbid_overlap_with_C_or_V: true
-  wm_nback:
+  reasoning_pmat:
+    role: primary
+    primary: true
+    analysis_eligible: true
+    description: PMAT fluid reasoning accuracy
+    columns:
+      - PMAT24_A_CR
+    anti_circularity:
+      exclude_outcome_from_K: true
+      forbid_overlap_with_C_or_V: true
+  attention_control:
+    role: secondary_near_domain
     primary: false
-    required_for_support: false
+    analysis_eligible: true
+    description: Card Sort attention/control near-domain comparison
+    columns:
+      - CardSort_Unadj
+    anti_circularity:
+      exclude_outcome_from_K: true
+      forbid_overlap_with_C_or_V: true
+  wm_nback:
+    role: blocked_optional
+    primary: false
     analysis_eligible: false
     status: optional_known_issue_pending
-    future_route: independently reconstructed task/run/trial-level 2-back accuracy or official HCP resolution required before inference
+    description: HCP aggregate 2-back accuracy remains scientifically ineligible
     columns:
       - WM_Task_2bk_Acc
     anti_circularity:
       exclude_outcome_from_K: true
       forbid_overlap_with_C_or_V: true
-  reasoning_pmat:
-    primary: true
-    required_for_support: true
-    columns:
-      - PMAT24_A_CR
-    secondary_columns:
-      - PMAT24_A_RTCR
-    anti_circularity:
-      exclude_outcome_from_K: true
-      forbid_overlap_with_C_or_V: true
   reasoning_relational:
+    role: blocked_optional
     primary: false
-    required_for_support: false
     analysis_eligible: false
+    description: optional relational-processing field not present in current support extract
     columns:
       - Relational_Task_Acc
     anti_circularity:
       exclude_outcome_from_K: true
       forbid_overlap_with_C_or_V: true
 
-primary_model_sequence:
-  - id: K
-    predictors:
-      - K
-  - id: K_plus_C_candidate
-    predictors:
-      - K
-      - C_candidate
-  - id: K_plus_V
-    predictors:
-      - K
-      - V
-  - id: K_plus_C_candidate_plus_V
-    predictors:
-      - K
-      - C_candidate
-      - V
-  - id: K_plus_C_candidate_plus_V_plus_C_by_V
-    predictors:
-      - K
-      - C_candidate
-      - V
-      - C_candidate_by_V
+diagnostic_outcomes:
+  pmat_rt:
+    column: PMAT24_A_RTCR
+    status: diagnostic_only
+    construct_composite_allowed: false
 
-domain_weight_test:
-  enabled: true
-  coefficient_table:
-    rows:
-      - attention_control
-      - wm_list_sorting
-      - reasoning_pmat
-    columns:
-      - K
+model_set:
+  - id: M0_intercept
+    formula: Y ~ intercept
+    predictors: []
+  - id: M1_K
+    formula: Y ~ K
+    predictors:
+      - K_candidate
+  - id: M2_K_plus_C
+    formula: Y ~ K + C
+    predictors:
+      - K_candidate
       - C_candidate
-      - V
-  interpretation_boundary: coefficient differences are domain-demand diagnostics, not mechanism validation
+  - id: M3_K_plus_V
+    formula: Y ~ K + V
+    predictors:
+      - K_candidate
+      - V_candidate
+  - id: M4_K_plus_C_plus_V
+    formula: Y ~ K + C + V
+    predictors:
+      - K_candidate
+      - C_candidate
+      - V_candidate
+  - id: M5_K_plus_C_plus_V_plus_C_by_V
+    formula: Y ~ K + C + V + C_by_V
+    predictors:
+      - K_candidate
+      - C_candidate
+      - V_candidate
+      - C_by_V
+    status: secondary_interaction_low_precision
 
-layer_specific_residual_tests:
-  enabled_after_primary_transport_only: true
-  wm_specific:
-    status: blocked_until_independent_indicators_registered
-    candidate_indicators:
-      - reconstructed_2back_accuracy_future
-  reasoning_specific:
-    status: blocked_until_independent_indicators_registered
-    candidate_indicators:
-      - Relational_Task_Acc
-  no_outcome_reuse_for_specific_factor: true
+registered_contrasts:
+  K_increment:
+    comparison_model: M1_K
+    reference_model: M0_intercept
+    status: primary
+  C_increment_beyond_K:
+    comparison_model: M2_K_plus_C
+    reference_model: M1_K
+    status: primary
+  V_increment_beyond_K:
+    comparison_model: M3_K_plus_V
+    reference_model: M1_K
+    status: primary
+  joint_CV_increment_beyond_K:
+    comparison_model: M4_K_plus_C_plus_V
+    reference_model: M1_K
+    status: primary
+  interaction_increment:
+    comparison_model: M5_K_plus_C_plus_V_plus_C_by_V
+    reference_model: M4_K_plus_C_plus_V
+    status: secondary_only
 
 validation:
-  primary_metric: family_or_unrelated_isolated_heldout_predictive_log_density
+  primary_metric: participant_isolated_heldout_predictive_log_density_per_participant
   n_folds: 5
+  split_strategy: participant_isolated_official_hcp_100_unrelated
   split_seed: 20260822
   ridge_alpha: 1.0
   bootstrap_seed: 20260823
   bootstrap_iterations: 1000
   all_scaling_inside_training_folds: true
-  outcome_specific_K_exclusion_required: true
+  participant_level_score_deltas_used_for_aggregates_only: true
+  participant_level_predictions_written: false
+  secondary_metrics:
+    - RMSE
+    - MAE
+    - heldout_R2
+    - heldout_correlation_if_well_defined
 
-decision_plan:
-  transversal_support_pattern_labels:
-    - K_C_V_predict_all_domains
-    - K_C_V_predict_all_domains_with_different_weights
-    - K_only_transports_C_V_attention_local
-    - layer_specific_residuals_remain
-    - no_transversal_support
-    - inconclusive
-  no_confirmatory_claim_from_single_dataset: true
-  nki_replication_required_for_transport_claim: true
+domain_weight_test:
+  enabled: true
+  status: secondary_low_precision
+  domains:
+    - attention_control
+    - wm_list_sorting
+    - reasoning_pmat
+  outcome_standardisation: training_fold_domain_specific_mean_sd
+  common_slope_formula: Y_standardised ~ domain + K + C + V
+  domain_specific_slope_formula: Y_standardised ~ domain + K + C + V + domain_by_K + domain_by_C + domain_by_V
+  participant_isolation_requirement: all_domain_rows_for_participant_in_same_fold
+  score: heldout_predictive_density_averaged_per_participant
+  interpretation_boundary: domain-specific weights are demand diagnostics, not domain-specific latent constructs
+
+interpretation_boundaries:
+  broad_transversal_K_signal: encouraging_if_M1_improves_over_M0_for_both_ListSort_and_PMAT_accuracy
+  incremental_CV_transport: report_C_and_V_beyond_K_separately_by_domain
+  different_domain_weights_allowed: true
+  unequal_domain_weights_are_not_failure_by_themselves: true
+  confirmatory_architecture_claim_allowed: false
+  no_retrospective_indicator_model_interaction_or_outcome_addition: true
+  interaction_estimates_label: low_precision
+
+m6_2_layer_specific_capacity_gate:
+  status: blocked_pending_independent_second_WM_indicator
+  reason: current HCP support contains only one scientifically eligible WM outcome, ListSort_Unadj
+  required_before_W_specific_claim: at_least_two_independent_eligible_WM_indicators
+  possible_later_routes:
+    - independently_reconstruct_HCP_2back_performance_from_task_level_files
+    - test_shared_WM_specific_structure_in_NKI_Rockland_using_independent_WM_measures
+  descriptive_residual_variance_allowed: true
+  forbidden_residual_labels:
+    - W
+    - WM capacity
+    - layer-specific factor
+    - bottleneck
+
+m6_3_bottleneck_gate:
+  status: blocked_until_m6_2_establishes_defensible_independent_layer_specific_WM_candidate
+  k_by_w_tests_allowed: false
+  c_by_w_tests_allowed: false
+  reason: prevents a noisy single-task residual from becoming a post-hoc bottleneck variable
 
 outputs:
   output_dir: reports/generated/hcp_ya_transversal_analysis_v1
-  protocol_md: research-program/M6_HCP_YA_TRANSVERSAL_ANALYSIS_PROTOCOL_V1.md
-  plan_report_md: research-program/M6_HCP_YA_TRANSVERSAL_ANALYSIS_PLAN.md
+  plan_report_md: research-program/M6_1_HCP_YA_TRANSVERSAL_ANALYSIS_PLAN.md
+  protocol_md: research-program/M6_1_HCP_YA_TRANSVERSAL_ANALYSIS_PROTOCOL.md
+  analysis_report_md: research-program/M6_1_HCP_YA_TRANSVERSAL_ANALYSIS_REPORT.md
+  participant_free_summary_json: research-program/M6_1_HCP_YA_TRANSVERSAL_ANALYSIS_SUMMARY.json
+  manifest_json: manifests/M6_1_HCP_YA_TRANSVERSAL_ANALYSIS_MANIFEST.json
