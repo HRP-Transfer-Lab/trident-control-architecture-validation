@@ -45,6 +45,7 @@ def test_hcp_transversal_removes_outcome_columns_from_domain_k():
     df.to_csv(data_path, index=False)
     config["inputs"]["hcp_extract_path"] = str(data_path)
     config["inputs"]["hcp_extract_sha256"] = None
+    config["outputs"]["preflight_report_md"] = str(work_dir / "preflight.md")
     config_path = work_dir / "config.yaml"
     config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 
@@ -97,6 +98,7 @@ def test_hcp_transversal_reports_missing_data_file_without_fitting():
     work_dir = ROOT / "reports" / "generated" / "test_hcp_transversal_missing"
     work_dir.mkdir(parents=True, exist_ok=True)
     config["inputs"]["hcp_extract_path"] = str(work_dir / "missing.csv")
+    config["outputs"]["preflight_report_md"] = str(work_dir / "preflight.md")
     config_path = work_dir / "config.yaml"
     config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 
