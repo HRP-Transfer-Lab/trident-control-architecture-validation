@@ -12,6 +12,11 @@ The analysis tests whether the same lower-level K/C_candidate/V coordinates
 provide out-of-sample predictive information across working memory and fluid
 reasoning, with attention/control as a secondary near-domain comparison.
 
+In the programme-level registry, this is a Capability / State analysis. It asks
+what broad resources or current conditions are available. It does not estimate
+Representational variables such as `L_WM` or Strategic variables such as
+`A_evidence`, `T_commit` or `PC_calibration`.
+
 The analysis does not confirm g, a latent cognitive-control mechanism, a latent
 vigilance mechanism, Trident-G, APC, PACE, W-specific capacity, bottlenecks,
 criticality or transfer.

@@ -110,7 +110,10 @@ design. Its machine-readable companion is
 `config/hrp_stack_variable_registry_v2.yaml`, which registers `K`, `V`,
 `C_signal`, `A_evidence`, `T_commit`, `PC_calibration`, `R_dynamic`,
 `P_pace`, `Y_behavior`, `Transfer_external` and the MECH0-MECH7 causal
-families for later identifiability testing.
+families for later identifiability testing. It also separates the
+Capability/State, Representational and Strategic programmes, including gated
+representational layer candidates such as `L_attention`, `L_WM`,
+`L_predictive` and `L_reasoning`.
 
 ## Operating rule
 

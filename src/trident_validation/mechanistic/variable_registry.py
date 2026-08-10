@@ -31,6 +31,17 @@ CAUSAL_FAMILY_IDS = (
     "MECH6",
     "MECH7",
 )
+PROGRAMME_IDS = (
+    "capability_state",
+    "representational",
+    "strategic",
+)
+REPRESENTATIONAL_LAYER_IDS = (
+    "L_attention",
+    "L_WM",
+    "L_predictive",
+    "L_reasoning",
+)
 
 
 @dataclass(frozen=True)
@@ -39,9 +50,12 @@ class VariableRegistry:
 
     registry_id: str
     status: str
+    programmes: dict[str, dict[str, Any]]
+    representational_layers: dict[str, dict[str, Any]]
     variables: dict[str, dict[str, Any]]
     causal_families: dict[str, dict[str, Any]]
     identifiability_gates: tuple[dict[str, Any], ...]
+    programme_transition_gates: tuple[dict[str, Any], ...]
 
 
 def load_variable_registry(path: str | Path) -> VariableRegistry:
@@ -54,11 +68,16 @@ def validate_variable_registry(config: dict[str, Any]) -> VariableRegistry:
     """Validate the M3 variable architecture contract."""
 
     registry = _required_mapping(config, "registry")
+    programmes = _required_mapping(config, "programmes")
+    representational_layers = _required_mapping(config, "representational_layers")
     variables = _required_mapping(config, "variables")
     families = _required_mapping(config, "causal_families")
     gates = config.get("identifiability_gates")
     if not isinstance(gates, list) or not gates:
         raise ConfigValidationError("identifiability_gates must be a non-empty list")
+    programme_gates = config.get("programme_transition_gates")
+    if not isinstance(programme_gates, list) or not programme_gates:
+        raise ConfigValidationError("programme_transition_gates must be a non-empty list")
 
     if registry.get("id") != "hrp_stack_variable_registry_v2":
         raise ConfigValidationError("registry.id must be hrp_stack_variable_registry_v2")
@@ -83,13 +102,28 @@ def validate_variable_registry(config: dict[str, Any]) -> VariableRegistry:
         raise ConfigValidationError(
             "causal_families missing required ids: " + ", ".join(sorted(missing_families))
         )
+    missing_programmes = set(PROGRAMME_IDS).difference(programmes)
+    if missing_programmes:
+        raise ConfigValidationError(
+            "programmes missing required ids: " + ", ".join(sorted(missing_programmes))
+        )
+    missing_layers = set(REPRESENTATIONAL_LAYER_IDS).difference(representational_layers)
+    if missing_layers:
+        raise ConfigValidationError(
+            "representational_layers missing required ids: " + ", ".join(sorted(missing_layers))
+        )
 
+    _validate_programmes(programmes)
+    for layer_id in REPRESENTATIONAL_LAYER_IDS:
+        _validate_representational_layer(layer_id, representational_layers[layer_id])
     for variable_id in REQUIRED_VARIABLE_IDS:
         _validate_variable(variable_id, variables[variable_id])
     for family_id in CAUSAL_FAMILY_IDS:
         _validate_family(family_id, families[family_id], variables)
     for index, gate in enumerate(gates):
         _validate_gate(index, gate, families)
+    for index, gate in enumerate(programme_gates):
+        _validate_programme_transition_gate(index, gate, programmes)
 
     transfer = variables["Transfer_external"]
     if transfer.get("measurement_status") != "external_criterion":
@@ -106,10 +140,78 @@ def validate_variable_registry(config: dict[str, Any]) -> VariableRegistry:
     return VariableRegistry(
         registry_id=str(registry["id"]),
         status=str(registry.get("status", "")),
+        programmes={str(key): dict(value) for key, value in programmes.items()},
+        representational_layers={str(key): dict(value) for key, value in representational_layers.items()},
         variables={str(key): dict(value) for key, value in variables.items()},
         causal_families={str(key): dict(value) for key, value in families.items()},
         identifiability_gates=tuple(dict(gate) for gate in gates),
+        programme_transition_gates=tuple(dict(gate) for gate in programme_gates),
     )
+
+
+def _validate_programmes(programmes: dict[str, Any]) -> None:
+    capability = programmes["capability_state"]
+    representational = programmes["representational"]
+    strategic = programmes["strategic"]
+    _validate_programme_record("capability_state", capability, variables_required=True)
+    _validate_programme_record("representational", representational, variables_required=False)
+    _validate_programme_record("strategic", strategic, variables_required=True)
+    if tuple(capability.get("variables", ())) != ("K", "C_signal", "V"):
+        raise ConfigValidationError("capability_state programme must contain K, C_signal and V only")
+    if tuple(str(item) for item in strategic.get("variables", ())) != (
+        "A_evidence",
+        "T_commit",
+        "PC_calibration",
+    ):
+        raise ConfigValidationError("strategic programme must contain A_evidence, T_commit and PC_calibration only")
+    if tuple(str(item) for item in representational.get("layer_candidates", ())) != REPRESENTATIONAL_LAYER_IDS:
+        raise ConfigValidationError("representational programme must contain the frozen L_* layer candidates")
+    if "do_not_label_single_task_residual_as_layer_capacity" not in representational.get("forbidden_collapses", []):
+        raise ConfigValidationError("representational programme must block single-task residual layer claims")
+    if (
+        representational.get("prerequisite_for_bottleneck_tests")
+        != "at_least_two_independent_indicators_for_the_target_layer"
+    ):
+        raise ConfigValidationError("representational bottleneck prerequisite must require independent indicators")
+
+
+def _validate_programme_record(programme_id: str, record: Any, *, variables_required: bool) -> None:
+    if not isinstance(record, dict):
+        raise ConfigValidationError(f"{programme_id} must be a mapping")
+    for field in ("label", "core_question", "allowed_claim_scope", "forbidden_collapses"):
+        if field not in record:
+            raise ConfigValidationError(f"{programme_id} missing required field: {field}")
+    if variables_required and not record.get("variables"):
+        raise ConfigValidationError(f"{programme_id}.variables must be non-empty")
+    if not isinstance(record["forbidden_collapses"], list) or not record["forbidden_collapses"]:
+        raise ConfigValidationError(f"{programme_id}.forbidden_collapses must be a non-empty list")
+
+
+def _validate_representational_layer(layer_id: str, record: Any) -> None:
+    if not isinstance(record, dict):
+        raise ConfigValidationError(f"{layer_id} must be a mapping")
+    for field in (
+        "label",
+        "programme",
+        "status",
+        "minimum_independent_indicators",
+        "can_be_estimated_from_single_task_residual",
+        "may_moderate_capability_state_expression_after_gate",
+        "bottleneck_tests_allowed_before_gate",
+        "forbidden_labels_before_gate",
+    ):
+        if field not in record:
+            raise ConfigValidationError(f"{layer_id} missing required field: {field}")
+    if record.get("programme") != "representational":
+        raise ConfigValidationError(f"{layer_id} must belong to the representational programme")
+    if int(record["minimum_independent_indicators"]) < 2:
+        raise ConfigValidationError(f"{layer_id} must require at least two independent indicators")
+    if record.get("can_be_estimated_from_single_task_residual") is not False:
+        raise ConfigValidationError(f"{layer_id} must not be estimated from a single-task residual")
+    if record.get("bottleneck_tests_allowed_before_gate") is not False:
+        raise ConfigValidationError(f"{layer_id} must block bottleneck tests before the layer gate")
+    if not isinstance(record["forbidden_labels_before_gate"], list) or not record["forbidden_labels_before_gate"]:
+        raise ConfigValidationError(f"{layer_id}.forbidden_labels_before_gate must be non-empty")
 
 
 def _validate_variable(variable_id: str, record: Any) -> None:
@@ -166,6 +268,30 @@ def _validate_gate(
         raise ConfigValidationError(
             f"identifiability_gates[{index}] references unknown families: "
             + ", ".join(sorted(unknown))
+        )
+
+
+def _validate_programme_transition_gate(
+    index: int,
+    record: Any,
+    programmes: dict[str, Any],
+) -> None:
+    if not isinstance(record, dict):
+        raise ConfigValidationError(f"programme_transition_gates[{index}] must be a mapping")
+    for field in ("id", "required_evidence", "forbidden_shortcut"):
+        if field not in record:
+            raise ConfigValidationError(f"programme_transition_gates[{index}] missing field: {field}")
+    source = record.get("source_programme")
+    target = record.get("target_programme")
+    if source is not None and str(source) not in programmes:
+        raise ConfigValidationError(f"programme_transition_gates[{index}] references unknown source programme")
+    if target is not None and str(target) not in programmes:
+        raise ConfigValidationError(f"programme_transition_gates[{index}] references unknown target programme")
+    if "single_task_residual" in str(record.get("forbidden_shortcut", "")) and "independent" not in str(
+        record.get("required_evidence", "")
+    ):
+        raise ConfigValidationError(
+            f"programme_transition_gates[{index}] must pair residual shortcuts with independent evidence"
         )
 
 

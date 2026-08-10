@@ -2,6 +2,8 @@
 
 from .variable_registry import (
     CAUSAL_FAMILY_IDS,
+    PROGRAMME_IDS,
+    REPRESENTATIONAL_LAYER_IDS,
     REQUIRED_VARIABLE_IDS,
     VariableRegistry,
     load_variable_registry,
@@ -10,6 +12,8 @@ from .variable_registry import (
 
 __all__ = [
     "CAUSAL_FAMILY_IDS",
+    "PROGRAMME_IDS",
+    "REPRESENTATIONAL_LAYER_IDS",
     "REQUIRED_VARIABLE_IDS",
     "VariableRegistry",
     "load_variable_registry",

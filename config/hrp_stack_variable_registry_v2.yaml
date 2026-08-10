@@ -1,12 +1,132 @@
 registry:
   id: hrp_stack_variable_registry_v2
   milestone: M3_variable_architecture_v2
-  status: frozen_for_mechanistic_synthetic_design
+  status: frozen_for_mechanistic_synthetic_design_with_programme_layers
   formal_claims_allowed: false
   real_transfer_outcomes_allowed: false
   trident_validation_claim_allowed: false
   neural_criticality_claim_allowed: false
   cusp_required: false
+
+programmes:
+  capability_state:
+    label: capability_state_programme
+    core_question: what resources or current conditions are available
+    variables:
+      - K
+      - C_signal
+      - V
+    allowed_claim_scope: broad_resources_and_conditions
+    forbidden_collapses:
+      - do_not_treat_K_as_confirmed_g
+      - do_not_treat_C_signal_as_confirmed_cognitive_control_without_identifiability
+      - do_not_treat_V_as_confirmed_vigilance_mechanism_without_identifiability
+      - do_not_use_capability_state_scores_as_layer_specific_capacity
+      - do_not_use_capability_state_scores_as_strategy_parameters
+
+  representational:
+    label: representational_programme
+    core_question: where structural capacity or information bottlenecks bind
+    layer_candidates:
+      - L_attention
+      - L_WM
+      - L_predictive
+      - L_reasoning
+    allowed_claim_scope: independently_identified_layer_constraints
+    prerequisite_for_bottleneck_tests: at_least_two_independent_indicators_for_the_target_layer
+    forbidden_collapses:
+      - do_not_label_single_task_residual_as_layer_capacity
+      - do_not_convert_ListSort_residual_into_W_specific
+      - do_not_run_K_by_L_or_C_by_L_bottleneck_tests_until_layer_candidate_is_defensible
+      - do_not_treat_domain_weight_differences_as_domain_specific_latents
+
+  strategic:
+    label: strategic_programme
+    core_question: how the person uses evidence and chooses action under changing context
+    variables:
+      - A_evidence
+      - T_commit
+      - PC_calibration
+    allowed_claim_scope: evidence_use_thresholding_and_calibration
+    forbidden_collapses:
+      - do_not_infer_strategy_from_raw_accuracy_alone
+      - do_not_equate_fast_response_with_low_threshold_without_model_support
+      - do_not_call_predictive_calibration_without_prediction_confidence_or_reliability_observables
+
+representational_layers:
+  L_attention:
+    label: attention_layer_capacity_or_constraint
+    programme: representational
+    status: candidate_blocked_until_independent_indicators
+    minimum_independent_indicators: 2
+    can_be_estimated_from_single_task_residual: false
+    may_moderate_capability_state_expression_after_gate: true
+    bottleneck_tests_allowed_before_gate: false
+    forbidden_labels_before_gate:
+      - bottleneck
+      - layer-specific factor
+      - attention capacity
+
+  L_WM:
+    label: working_memory_layer_capacity_or_constraint
+    programme: representational
+    status: blocked_pending_independent_second_WM_indicator
+    current_hcp_eligible_indicators:
+      - ListSort_Unadj
+    minimum_independent_indicators: 2
+    can_be_estimated_from_single_task_residual: false
+    may_moderate_capability_state_expression_after_gate: true
+    bottleneck_tests_allowed_before_gate: false
+    later_routes:
+      - independently_reconstruct_HCP_2back_performance_from_task_level_files
+      - test_shared_WM_specific_structure_in_NKI_Rockland_using_independent_WM_measures
+    forbidden_labels_before_gate:
+      - W
+      - WM capacity
+      - layer-specific factor
+      - bottleneck
+
+  L_predictive:
+    label: predictive_representation_capacity_or_constraint
+    programme: representational
+    status: candidate_blocked_until_independent_indicators
+    minimum_independent_indicators: 2
+    can_be_estimated_from_single_task_residual: false
+    may_moderate_capability_state_expression_after_gate: true
+    bottleneck_tests_allowed_before_gate: false
+    forbidden_labels_before_gate:
+      - predictive bottleneck
+      - layer-specific factor
+
+  L_reasoning:
+    label: reasoning_layer_capacity_or_constraint
+    programme: representational
+    status: candidate_blocked_until_independent_indicators
+    minimum_independent_indicators: 2
+    can_be_estimated_from_single_task_residual: false
+    may_moderate_capability_state_expression_after_gate: true
+    bottleneck_tests_allowed_before_gate: false
+    forbidden_labels_before_gate:
+      - reasoning capacity
+      - layer-specific factor
+      - bottleneck
+
+programme_transition_gates:
+  - id: capability_to_representational
+    source_programme: capability_state
+    target_programme: representational
+    required_evidence: at_least_two_independent_indicators_for_target_layer
+    forbidden_shortcut: single_task_residual_or_domain_weight_difference
+  - id: representational_to_bottleneck
+    source_programme: representational
+    target_test: capability_state_by_layer_interaction
+    required_evidence: defensible_independent_layer_candidate_established_before_outcome_interaction_tests
+    forbidden_shortcut: post_hoc_noisy_residual_bottleneck_variable
+  - id: capability_to_strategic
+    source_programme: capability_state
+    target_programme: strategic
+    required_evidence: task_design_with_evidence_threshold_calibration_or_context_observables
+    forbidden_shortcut: raw_accuracy_or_rt_only_strategy_claim
 
 variables:
   K:
