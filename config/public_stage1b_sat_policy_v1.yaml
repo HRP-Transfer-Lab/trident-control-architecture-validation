@@ -1,0 +1,173 @@
+analysis:
+  id: public_stage1b_sat_policy_v1
+  milestone: M5_stage1b_speed_accuracy_policy_candidate
+  status: pre_outcome_registered_analysis
+  question: Is there a reproducible cross-task speed-accuracy policy dimension beyond K, C_signal and V?
+  hypothesis_timing: formulated_after_stage1_to_stage3_review
+  formal_claims_allowed: false
+  trident_validation_claim_allowed: false
+  transfer_outcomes_allowed: false
+  pace_ontology_claim_allowed: false
+  dynamic_regime_allowed: false
+  neural_criticality_claim_allowed: false
+  cusp_claim_allowed: false
+  t_commit_claim_allowed: false
+  predictive_calibration_claim_allowed: false
+  optimality_claim_allowed: false
+
+inputs:
+  paired_session_features_path: ../../.tmp-zone-replication/flow-zone-zone-validation/data/processed/paired_vigilance_session_features.parquet
+  paired_session_features_sha256: DD30838E96FBC1A80C42D0CD41161644B1563BCCC3901B39AB9E9A1DED0065A0
+  upstream_repository: HRP-Transfer-Lab/flow-zone-zone-validation
+  upstream_commit: 2d8d479befd73155d2215c1fef80a60cd27eaa5b
+  stage1_report_commit: 3276fcf150a5d7646ea439aeb84bb07cf3d42019
+  stage2_report_commit: 37c6fd2374c1351bb1519204414623084ede1c9a
+  stage3_report_commit: a2c5bf6cc2f859a6a3de0534300ecc67a7958986
+
+support_preflight:
+  required_primary_tasks:
+    - Stroop
+    - Flanker
+  required_observables:
+    Stroop:
+      accuracy: stroop_accuracy
+      mean_rt_ms: stroop_mean_rt_ms
+    Flanker:
+      accuracy: flanker_accuracy
+      mean_rt_ms: flanker_mean_rt_ms
+  minimum_complete_policy_rows: 100
+  minimum_complete_policy_participants: 30
+
+identity_columns:
+  participant_id: participant_id
+  session_id: session_id
+  session_order: session_type
+  session_order_values:
+    online: 0
+    lab1: 1
+    lab2: 2
+
+forbidden_columns:
+  - low_engagement_candidate
+  - high_engagement_candidate
+  - control_profile
+  - control_profile_probability
+
+feature_groups:
+  K:
+    source: copied_from_public_stage1_k_c_v_v1
+    columns:
+      stroop_accuracy: 1
+      flanker_accuracy: 1
+      stroop_mean_rt_ms: -1
+      flanker_mean_rt_ms: -1
+      stroop_throughput: 1
+      flanker_throughput: 1
+  C_signal:
+    source: copied_from_public_stage1_k_c_v_v1
+    columns:
+      stroop_interference_rt_ms: -1
+      flanker_interference_rt_ms: -1
+      stroop_interference_accuracy: -1
+      flanker_interference_accuracy: -1
+  V:
+    source: copied_from_public_stage1_k_c_v_v1
+    columns:
+      sart_commission_rate: -1
+      sart_omission_rate: -1
+      sart_anticipatory_rate: -1
+      sart_go_rt_cv: -1
+      sart_pre_failure_speeding_ms: -1
+
+policy_construction:
+  primary_tasks:
+    - Stroop
+    - Flanker
+  accuracy_columns:
+    Stroop: stroop_accuracy
+    Flanker: flanker_accuracy
+  mean_rt_columns:
+    Stroop: stroop_mean_rt_ms
+    Flanker: flanker_mean_rt_ms
+  fold_fitted_scaling_only: true
+  speed_definition: speed_q = -z_train(mean_rt_q)
+  policy_definition: T_q = (z_train(accuracy_q) - speed_q) / sqrt(2)
+  common_policy: T_common = mean(T_stroop, T_flanker)
+  sign_rule: higher means relatively accuracy-favouring/cautious; lower means relatively speed-favouring/rapid
+  task_weights_fitted_from_data: false
+  cross_task_target_task_k_leakage_guard: leave_target_task_general_speed_accuracy_and_throughput_out_of_K
+
+validation:
+  participant_isolated: true
+  n_folds: 5
+  split_seed: 20260815
+  ridge_alpha: 1.0
+  bootstrap_seed: 20260816
+  bootstrap_iterations: 1000
+  ci: 0.95
+
+primary_test_a_cross_task_transport:
+  target_flanker:
+    base_predictors:
+      - K_without_Flanker_general
+      - C_signal
+      - V
+    policy_predictors:
+      - K_without_Flanker_general
+      - C_signal
+      - V
+      - T_stroop
+    negative_controls:
+      - speed_stroop
+      - accuracy_stroop
+  target_stroop:
+    base_predictors:
+      - K_without_Stroop_general
+      - C_signal
+      - V
+    policy_predictors:
+      - K_without_Stroop_general
+      - C_signal
+      - V
+      - T_flanker
+    negative_controls:
+      - speed_flanker
+      - accuracy_flanker
+  primary_metric: participant_isolated_heldout_predictive_log_density
+  mean_contrast: mean_of_both_directional_policy_contrasts
+
+primary_test_b_next_session_persistence:
+  adjacent_sessions_only: true
+  base_predictors:
+    - K_current
+    - C_signal_current
+    - V_current
+  policy_predictors:
+    - K_current
+    - C_signal_current
+    - V_current
+    - T_common_current
+  target: T_common_next
+  negative_controls:
+    - speed_common_current
+    - accuracy_common_current
+
+decision_rule:
+  status_values:
+    - policy_dimension_supported
+    - policy_dimension_not_supported
+    - inconclusive
+  require_no_forbidden_columns_used: true
+  require_no_future_session_leakage: true
+  require_participant_isolated_scores_finite: true
+  residual_variance_fraction_minimum_for_support: 0.20
+  residual_variance_fraction_maximum_for_not_supported: 0.10
+  primary_mean_delta_minimum: 0.0
+  primary_ci_lower_tolerance: -0.005
+  disconfirm_ci_upper_maximum: 0.0
+  require_cross_task_and_temporal_agreement_for_support: true
+
+outputs:
+  output_dir: reports/generated/public_stage1b_sat_policy_v1
+  protocol_md: research-program/M5_STAGE1B_SAT_POLICY_PROSPECTIVE_PROTOCOL.md
+  report_md: research-program/M5_STAGE1B_SAT_POLICY_REAL_DATA_ANALYSIS.md
