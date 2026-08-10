@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from datetime import datetime, timezone
-import hashlib
 import json
 import math
 import os

@@ -20,7 +20,6 @@ import pandas as pd
 
 from trident_validation.config import ConfigValidationError, load_yaml_config
 from trident_validation.mechanistic.identifiability_plan import (
-    dataframe_hash,
     load_mechanistic_identifiability_plan,
 )
 from trident_validation.provenance import hash_file, hash_mapping
