@@ -1,0 +1,83 @@
+schema:
+  id: hcp_ya_transversal_extract_schema_v1
+  status: local_extract_schema_no_participant_data
+  target_path: data/processed/hcp_ya_transversal_extract.csv
+  participant_level_data_in_git_allowed: false
+  model_fitting_allowed: false
+  purpose: define the local HCP-YA behavioural extract needed for transversal K/C/V preflight
+
+identity:
+  required:
+    Subject:
+      description: HCP participant identifier
+      restricted: false
+    Family_ID:
+      description: family identifier for family-isolated cross-validation
+      restricted: true
+      alternative_if_unavailable: provide an unrelated-only extract and configure unrelated indicator before analysis
+  optional:
+    Unrelated:
+      description: boolean indicator for unrelated-only cohort membership if restricted family structure is unavailable
+      restricted: false
+
+predictor_candidates:
+  K:
+    columns:
+      NIH_Flanker_Unadj:
+        role: broad performance candidate; also C_signal source, outcome-specific K exclusion applies where needed
+      NIH_ProcSpeed_Unadj:
+        role: processing-speed/general performance candidate
+      NIH_CardSort_Unadj:
+        role: attention/control general performance candidate; excluded from K when attention_control is the outcome
+      PicSeq_Unadj:
+        role: non-target general cognitive performance candidate
+      ReadEng_Unadj:
+        role: non-target general cognitive performance candidate
+      PicVocab_Unadj:
+        role: non-target general cognitive performance candidate
+  C_signal:
+    columns:
+      NIH_Flanker_Unadj:
+        role: Flanker/interference-control candidate
+  V:
+    columns:
+      SCPT_SEN:
+        role: Short Penn CPT sensitivity/sustained-attention candidate
+      SCPT_SPEC:
+        role: Short Penn CPT specificity/sustained-attention candidate
+
+heldout_outcomes:
+  attention_control:
+    primary: false
+    columns:
+      NIH_CardSort_Unadj:
+        role: attention/control held-out outcome candidate
+  wm_list_sorting:
+    primary: true
+    columns:
+      ListSort_Unadj:
+        role: List Sorting working-memory outcome
+  wm_nback:
+    primary: true
+    columns:
+      tfMRI_WM_2bk_Acc:
+        role: 2-back working-memory task outcome
+        note: rename local HCP task-fMRI column to this canonical name in the extract if needed
+  reasoning_pmat:
+    primary: true
+    columns:
+      PMAT24_A_CR:
+        role: PMAT correct responses / fluid reasoning accuracy
+      PMAT24_A_RTCR:
+        role: PMAT median correct-response RT; secondary diagnostic
+
+anti_circularity:
+  outcome_column_must_not_define_same_domain_predictor: true
+  list_sorting_excluded_from_K_when_wm_outcome: true
+  pmat_excluded_from_K_when_reasoning_outcome: true
+  c_signal_and_v_must_not_overlap_heldout_outcomes: true
+  ordinary_participant_folds_allowed: false
+
+local_template:
+  command: python -m trident_validation.mechanistic.hcp_extract_schema --schema config/hcp_ya_transversal_extract_schema_v1.yaml --write-template
+  writes_participant_rows: false
