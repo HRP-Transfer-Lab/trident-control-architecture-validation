@@ -1,0 +1,200 @@
+analysis:
+  id: hcp_ya_transversal_sensitivity_v1
+  milestone: M6_1b_HCP_YA_transversal_sensitivity_addendum
+  status: post_m6_1_exploratory_sensitivity_addendum
+  question: Are the M6.1 broad-K and C/V demand-pattern results robust to bounded K-construction sensitivity checks?
+  formulated_after_m6_1_outcome_inspection: true
+  changes_frozen_m6_1_analysis: false
+  exploratory_sensitivity_only: true
+  formal_claims_allowed: false
+  trident_validation_claim_allowed: false
+  transfer_outcomes_allowed: false
+  confirmed_g_claim_allowed: false
+  confirmed_c_signal_claim_allowed: false
+  confirmed_v_mechanism_claim_allowed: false
+  representational_operator_claim_allowed: false
+  strategic_policy_claim_allowed: false
+  bottleneck_claim_allowed: false
+  model_fitting_enabled: true
+
+inputs:
+  hcp_extract_path: data/processed/hcp_ya_transversal_extract.csv
+  extract_schema_path: config/hcp_ya_transversal_extract_schema_v1.yaml
+  base_analysis_config_path: config/hcp_ya_transversal_analysis_v1.yaml
+  participant_id_column: Subject
+  expected_n_subjects: 100
+  cohort_mode: hcp_100_unrelated
+  cohort_provenance:
+    official_hcp_100_unrelated_subjects_group_declared: true
+    official_group_name: HCP 100 Unrelated Subjects
+    exported_from_official_group: true
+  family_id_column: null
+  participant_level_data_in_git_allowed: false
+  participant_level_predictions_written: false
+  participant_level_scores_written: false
+
+constructs:
+  C_candidate:
+    label: Flanker inhibitory-control/attention candidate
+    columns:
+      - Flanker_Unadj
+    standardisation: training_fold_mean_sd
+  V_candidate:
+    label: sustained-attention/vigilance-readiness candidate
+    columns:
+      - SCPT_SEN
+      - SCPT_SPEC
+    standardisation: training_fold_mean_sd
+    aggregation: unweighted_arithmetic_mean_after_training_fold_standardisation
+
+k_sensitivity_variants:
+  - id: registered_full_k
+    label: frozen M6.1 K candidate
+    role: reference
+    columns:
+      - ProcSpeed_Unadj
+      - PicSeq_Unadj
+      - ReadEng_Unadj
+      - PicVocab_Unadj
+  - id: no_proc_speed
+    label: K sensitivity without processing speed
+    role: leave_one_indicator_out
+    columns:
+      - PicSeq_Unadj
+      - ReadEng_Unadj
+      - PicVocab_Unadj
+  - id: no_picseq
+    label: K sensitivity without picture sequence memory
+    role: leave_one_indicator_out
+    columns:
+      - ProcSpeed_Unadj
+      - ReadEng_Unadj
+      - PicVocab_Unadj
+  - id: no_readeng
+    label: K sensitivity without reading
+    role: leave_one_indicator_out
+    columns:
+      - ProcSpeed_Unadj
+      - PicSeq_Unadj
+      - PicVocab_Unadj
+  - id: no_picvocab
+    label: K sensitivity without vocabulary
+    role: leave_one_indicator_out
+    columns:
+      - ProcSpeed_Unadj
+      - PicSeq_Unadj
+      - ReadEng_Unadj
+  - id: language_crystallized_pair
+    label: reading/vocabulary pair diagnostic
+    role: split_pair_diagnostic_not_confirmed_construct
+    columns:
+      - ReadEng_Unadj
+      - PicVocab_Unadj
+  - id: speed_sequence_pair
+    label: processing-speed/picture-sequence pair diagnostic
+    role: split_pair_diagnostic_not_confirmed_construct
+    columns:
+      - ProcSpeed_Unadj
+      - PicSeq_Unadj
+
+outcome_domains:
+  wm_list_sorting:
+    role: primary_m6_1_domain
+    columns:
+      - ListSort_Unadj
+  reasoning_pmat:
+    role: primary_m6_1_domain
+    columns:
+      - PMAT24_A_CR
+  attention_control:
+    role: secondary_near_domain
+    columns:
+      - CardSort_Unadj
+
+forbidden_columns:
+  never_in_k_variant:
+    - Flanker_Unadj
+    - CardSort_Unadj
+    - ListSort_Unadj
+    - WM_Task_2bk_Acc
+    - Relational_Task_Acc
+    - PMAT24_A_CR
+    - PMAT24_A_RTCR
+    - CogTotalComp_Unadj
+    - CogTotalComp_AgeAdj
+    - CogFluidComp_Unadj
+    - CogFluidComp_AgeAdj
+    - CogCrystalComp_Unadj
+    - CogCrystalComp_AgeAdj
+  never_used:
+    - WM_Task_2bk_Acc
+    - Relational_Task_Acc
+    - PMAT24_A_RTCR
+
+model_families:
+  k_robustness:
+    models:
+      - id: S0_intercept
+        predictors: []
+      - id: S1_K_variant
+        predictors:
+          - K
+    contrast:
+      id: K_variant_increment
+      comparison_model: S1_K_variant
+      reference_model: S0_intercept
+  demand_pattern_reference:
+    k_variant: registered_full_k
+    models:
+      - id: S2_registered_K_plus_C
+        predictors:
+          - K
+          - C
+      - id: S3_registered_K_plus_V
+        predictors:
+          - K
+          - V
+      - id: S4_registered_K_plus_C_plus_V
+        predictors:
+          - K
+          - C
+          - V
+    contrasts:
+      C_increment_beyond_registered_K:
+        comparison_model: S2_registered_K_plus_C
+        reference_model: S1_K_variant
+      V_increment_beyond_registered_K:
+        comparison_model: S3_registered_K_plus_V
+        reference_model: S1_K_variant
+      joint_CV_increment_beyond_registered_K:
+        comparison_model: S4_registered_K_plus_C_plus_V
+        reference_model: S1_K_variant
+
+validation:
+  primary_metric: participant_isolated_heldout_predictive_log_density_per_participant
+  n_folds: 5
+  split_strategy: participant_isolated_official_hcp_100_unrelated
+  split_seed: 20260822
+  ridge_alpha: 1.0
+  bootstrap_seed: 20260824
+  bootstrap_iterations: 1000
+  all_scaling_inside_training_folds: true
+
+interpretation_boundaries:
+  sensitivity_is_post_m6_1: true
+  confirms_g: false
+  confirms_cognitive_control: false
+  confirms_vigilance_mechanism: false
+  tests_binding_operator: false
+  tests_relational_operator: false
+  tests_wm_updating_operator: false
+  tests_strategy: false
+  tests_bottleneck: false
+  single_task_residual_to_capacity_allowed: false
+
+outputs:
+  output_dir: reports/generated/hcp_ya_transversal_sensitivity_v1
+  protocol_md: research-program/M6_1_HCP_YA_TRANSVERSAL_SENSITIVITY_PROTOCOL.md
+  report_md: research-program/M6_1_HCP_YA_TRANSVERSAL_SENSITIVITY_REPORT.md
+  participant_free_summary_json: research-program/M6_1_HCP_YA_TRANSVERSAL_SENSITIVITY_SUMMARY.json
+  manifest_json: manifests/M6_1_HCP_YA_TRANSVERSAL_SENSITIVITY_MANIFEST.json

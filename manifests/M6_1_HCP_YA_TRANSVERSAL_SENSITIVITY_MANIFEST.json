@@ -1,0 +1,54 @@
+{
+  "analysis_id": "hcp_ya_transversal_sensitivity_v1",
+  "bootstrap": {
+    "iterations": 1000,
+    "seed": 20260824
+  },
+  "claims": {
+    "bottleneck_tests_run": false,
+    "c_signal_confirmed": false,
+    "formal_claims_allowed": false,
+    "g_confirmed": false,
+    "representational_operator_claim_allowed": false,
+    "strategic_policy_claim_allowed": false,
+    "v_mechanism_confirmed": false
+  },
+  "cohort_mode": "hcp_100_unrelated",
+  "config_content_hash": "sha256:4705855ba372a1d09119a7f5206ad7aa860fc3848107d6af07afd6ba47b553d4",
+  "config_hash": "sha256:29e8481aa63770fd2177ad0e065e8718fc6953f66ad7d6eba88bf39089288700",
+  "config_path": "config\\hcp_ya_transversal_sensitivity_v1.yaml",
+  "git_commit": "6aa614d67f141a68e70277abc2b6c1cf5ee79fe2",
+  "input_hash": "sha256:b43456153602ece24b2e8ea283b68e4faca3146f2a9b373588913704ae86069b",
+  "input_path": "C:\\Users\\admin\\OneDrive\\Documents\\GitHub\\trident-g-platform\\_local-worktrees\\hrp-trident-control-architecture-validation\\data\\processed\\hcp_ya_transversal_extract.csv",
+  "k_variant_ids": [
+    "registered_full_k",
+    "no_proc_speed",
+    "no_picseq",
+    "no_readeng",
+    "no_picvocab",
+    "language_crystallized_pair",
+    "speed_sequence_pair"
+  ],
+  "n_subjects": 100,
+  "output_hashes": {
+    "contrast_summary_content": "sha256:4d23ab9084abaebf64be79c23d1564a69bfb136d2bee53eaf9cade9de72a329b",
+    "demand_pattern_summary_content": "sha256:f809b0d5c54c329a8e3fe4551832f0a4c33909564d469efa871fbce813d30b2a",
+    "k_robustness_summary_content": "sha256:550de1e95b33202096e422314e1a5092d9be42fe0e7e4cd3d141375c82219952",
+    "model_summary_content": "sha256:f850027dd34f5add82f937618a8b045e68116969c59deb2e093f0462bfcda976"
+  },
+  "participant_level_outputs_written": false,
+  "ridge_alpha": 1.0,
+  "split": {
+    "fold_sizes": [
+      20,
+      20,
+      20,
+      20,
+      20
+    ],
+    "n_folds": 5,
+    "name": "participant_isolated_official_hcp_100_unrelated",
+    "seed": 20260822
+  },
+  "status": "m6_1b_sensitivity_complete_exploratory_no_confirmatory_claim"
+}
