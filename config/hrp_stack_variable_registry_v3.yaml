@@ -1,0 +1,260 @@
+registry:
+  id: hrp_stack_variable_registry_v3
+  milestone: M3_variable_architecture_v3
+  status: prospective_working_architecture_for_discriminative_testing
+  base_registry_path: config/hrp_stack_variable_registry_v2.yaml
+  base_registry_id: hrp_stack_variable_registry_v2
+  formal_claims_allowed: false
+  real_transfer_outcomes_allowed: false
+  trident_validation_claim_allowed: false
+  neural_criticality_claim_allowed: false
+  cusp_required: false
+  formulated_after_m6_1: true
+  changes_frozen_m6_1_analysis: false
+
+systems:
+  operating_capability_state:
+    label: operating_capability_state_system
+    core_question: what resources or current conditions are available
+    variables:
+      K:
+        registry_variable_id: K
+        label: broad general-capacity / g-like candidate
+        measurement_status: candidate
+        formal_claims_allowed: false
+        notes:
+          - do_not_call_confirmed_g
+      C:
+        registry_variable_id: C_signal
+        label: cognitive-control-specific capability candidate relative to K
+        measurement_status: candidate
+        formal_claims_allowed: false
+        conceptual_refinement: C need not be another fully general ability equivalent to K; it may contain control-specific variance beyond K and be recruited across representational levels in proportion to control demand.
+        backward_compatibility_note: keep C_signal as the registered observed variable ID where required; do not silently rename historical C_signal results as confirmed C_control.
+        m6_1_boundary: M6.1 supports only Flanker-derived C predicting independent CardSort performance beyond K; it did not demonstrate broad C transport to ListSort or PMAT.
+      V:
+        registry_variable_id: V
+        label: vigilance/readiness state candidate
+        measurement_status: candidate
+        formal_claims_allowed: false
+        state_sensitivity_allowed: true
+        psychometric_stability_like_K_required: false
+    forbidden_collapses:
+      - do_not_treat_K_as_confirmed_g
+      - do_not_treat_C_signal_as_confirmed_C_control
+      - do_not_require_V_to_behave_like_stable_K
+      - do_not_use_K_C_V_as_representational_specific_capacity
+      - do_not_use_K_C_V_as_strategy_parameters
+
+  strategic:
+    label: strategic_control_system
+    system_symbol: S
+    core_question: how the person uses evidence and chooses action under changing context
+    definition: evidence-to-action policy system
+    variables:
+      A_evidence:
+        registry_variable_id: A_evidence
+        label: evidence selection / weighting / updating policy
+        measurement_status: candidate
+        formal_claims_allowed: false
+      T_commit:
+        registry_variable_id: T_commit
+        label: commitment / stopping policy
+        measurement_status: candidate
+        formal_claims_allowed: false
+      PC_calibration:
+        registry_variable_id: PC_calibration
+        label: contextual metacontrol/calibration of A and T
+        measurement_status: candidate
+        formal_claims_allowed: false
+        calibrates:
+          - A_evidence
+          - T_commit
+        contextual_inputs:
+          - uncertainty
+          - reliability
+          - volatility
+          - cost
+          - urgency
+          - expected_value_of_further_evidence
+        not_a_parallel_strategy_ability: true
+    hcp_m6_1_status: untested
+    forbidden_collapses:
+      - do_not_infer_strategy_from_ordinary_accuracy_or_rt
+      - do_not_represent_PC_as_merely_a_third_parallel_strategy_ability
+      - do_not_equate_fast_response_with_low_threshold_without_model_support
+
+  representational:
+    label: ontology_neutral_representational_programme
+    core_question: what organises specific variance after frozen K/C/V influences are accounted for
+    no_ontology_preferred_by_registry_fiat: true
+    organisation_hypotheses:
+      layer:
+        id: H_LAYER
+        label: level_or_domain_specific_constraints
+        measurement_status: candidate
+        formal_claims_allowed: false
+        preferred_by_registry: false
+        description: representational constraints are primarily level/domain specific
+      cross_cutting_operator:
+        id: H_OPERATOR
+        label: cross_cutting_representational_or_computational_operators
+        measurement_status: candidate
+        formal_claims_allowed: false
+        preferred_by_registry: false
+        description: important specific capacities are operators recruited across levels according to task demand
+      hybrid:
+        id: H_HYBRID
+        label: local_constraints_plus_cross_cutting_operators
+        measurement_status: candidate
+        formal_claims_allowed: false
+        preferred_by_registry: false
+        description: both cross-cutting operators and local level-specific constraints exist
+    candidate_layers:
+      L_attention:
+        measurement_status: candidate
+        formal_claims_allowed: false
+        single_task_estimation_allowed: false
+      L_WM:
+        measurement_status: candidate
+        formal_claims_allowed: false
+        single_task_estimation_allowed: false
+      L_predictive:
+        measurement_status: candidate
+        formal_claims_allowed: false
+        single_task_estimation_allowed: false
+      L_reasoning:
+        measurement_status: candidate
+        formal_claims_allowed: false
+        single_task_estimation_allowed: false
+    candidate_operators:
+      OP_binding:
+        measurement_status: candidate
+        formal_claims_allowed: false
+        single_task_estimation_allowed: false
+        may_contribute_across:
+          - attention
+          - working_memory
+          - predictive_representations
+          - reasoning
+      OP_relational:
+        measurement_status: candidate
+        formal_claims_allowed: false
+        single_task_estimation_allowed: false
+        may_contribute_across:
+          - perception_attention
+          - working_memory
+          - predictive_mapping
+          - reasoning
+      OP_predictive:
+        measurement_status: candidate
+        formal_claims_allowed: false
+        single_task_estimation_allowed: false
+        may_contribute_across:
+          - working_memory
+          - learning
+          - planning
+          - reasoning
+
+m6_2_ontology_neutral_freeze:
+  status: frozen_pending_valid_second_WM_indicator_support
+  valid_second_indicator_required: independently_reconstructed_HCP_2back_behavioural_measure_for_official_100_unrelated_subjects
+  forbidden_indicator: WM_Task_2bk_Acc
+  question: After frozen K/C/V influences are accounted for, do two independent WM tasks share reliable held-out individual-difference variance?
+  allowed_positive_label:
+    - WM_shared_specific_candidate
+    - shared within-WM variance beyond K/C/V
+  forbidden_positive_labels:
+    - L_WM
+    - WM layer
+    - WM bottleneck
+    - relational capacity
+    - binding capacity
+  possible_organisations:
+    - WM-level constraint
+    - shared operator such as updating/binding/relational processing
+    - another shared task requirement
+    - mixture
+  frozen_predictors:
+    K:
+      - ProcSpeed_Unadj
+      - PicSeq_Unadj
+      - ReadEng_Unadj
+      - PicVocab_Unadj
+    C_candidate:
+      - Flanker_Unadj
+    V_candidate:
+      - SCPT_SEN
+      - SCPT_SPEC
+  primary_test:
+    design: bidirectional_heldout_residual_transport
+    residuals_must_be_cross_fitted: true
+    comparisons:
+      - base_model: 2Back ~ K + C + V
+        augmented_model: 2Back ~ K + C + V + cross_fitted_ListSort_residual
+      - base_model: ListSort ~ K + C + V
+        augmented_model: ListSort ~ K + C + V + cross_fitted_2Back_residual
+    primary_metric: participant_isolated_heldout_predictive_log_density
+    negative_control: CardSort
+  if_negative: no evidence in these measures for reliable shared WM-specific structure beyond K/C/V; do not infer that all representational specificity is absent
+  if_positive: register WM_shared_specific_candidate only; next problem is what organises the shared specific variance
+  fitting_allowed_now: false
+
+future_discriminative_representational_design:
+  status: planning_only
+  run_now: false
+  purpose: distinguish H_LAYER from H_OPERATOR and H_HYBRID
+  crossed_dimensions:
+    representational_level_or_task_domain:
+      - attention_perception
+      - working_memory
+      - reasoning
+    computational_operator_demand:
+      - binding
+      - relational
+      - predictive
+  conceptual_matrix:
+    attention_perception:
+      binding: required
+      relational: required
+      predictive: optional
+    working_memory:
+      binding: required
+      relational: required
+      predictive: required
+    reasoning:
+      binding: required
+      relational: required
+      predictive: where_feasible
+  discriminative_predictions:
+    layer_dominant: different WM tasks share specific residual variance primarily because they are WM tasks
+    operator_dominant: a relational WM task may share more specific variance with relational reasoning than with a binding WM task
+    hybrid: both within-level and same-operator cross-level residual structure remain
+
+future_C_control_design:
+  status: prospective_only
+  run_now: false
+  hypothesis: C may be a cognitive-control-specific factor relative to K, with deployment depending on task control demand
+  stronger_test_requires:
+    - multiple independent control indicators
+    - held-out tasks varying prospectively in control demand
+  desired_later_evidence:
+    - multiple control measures share variance after K is removed
+    - that specific component increasingly predicts performance as control demand increases, including at WM and reasoning levels
+  forbidden_inference: do_not_infer_this_architecture_from_Flanker_CardSort_alone
+
+gates:
+  single_task_residual_to_specific_capacity:
+    status: forbidden
+  two_same_domain_tasks_to_confirmed_layer_ontology:
+    status: forbidden
+  domain_weight_difference_to_new_latent_factor:
+    status: forbidden
+  K_by_specific_or_C_by_specific_before_independent_candidate:
+    status: forbidden
+  strategy_from_generic_rt_accuracy:
+    status: forbidden
+  layer_operator_hybrid_choice_after_target_outcome_inspection:
+    status: forbidden
+  transfer_outcome_used_to_define_predictor:
+    status: forbidden

@@ -54,39 +54,6 @@ Transfer_external
 external wrapper-transfer criterion for later prospective tests
 ```
 
-## Programme-Level Separation
-
-The registry now separates three programmes. These are levels of explanation,
-not interchangeable names for the same latent variable.
-
-```text
-Capability / State programme
-K, C_signal, V
-Question: what resources or current conditions are available?
-
-Representational programme
-L_attention, L_WM, L_predictive, L_reasoning
-Question: where do structural capacity or information bottlenecks bind?
-
-Strategic programme
-A_evidence, T_commit, PC_calibration
-Question: how does the person use evidence and choose action under changing
-context?
-```
-
-The current HCP-YA M6.1 analysis belongs to the Capability / State programme.
-It estimates broad K/C_candidate/V predictive support only. It does not
-estimate `L_WM`, `A_evidence`, `T_commit` or `PC_calibration`.
-
-Representational layer candidates are gated. A single task residual, such as
-unexplained `ListSort_Unadj` variance after K/C/V, may be reported only as
-descriptive residual variation. It is not `L_WM`, W, WM capacity, a
-layer-specific factor or a bottleneck.
-
-Strategic variables require task designs or measures that expose evidence use,
-thresholding, prediction, confidence, reliability weighting or changing context.
-They should not be inferred from raw accuracy or RT alone.
-
 ## Core Rules
 
 ```text
@@ -97,10 +64,6 @@ A literal cusp is not a required mechanism.
 Neural criticality is not inferred from behavioural data.
 Wrapper-transfer predictions must be frozen before real transfer outcomes are
 inspected.
-K/C/V capability-state coordinates must not be re-labelled as representational
-capacity or strategy parameters.
-Layer-specific bottleneck tests require an independently identified
-representational layer candidate.
 ```
 
 ## Causal Families For Synthetic Testing
@@ -156,3 +119,4 @@ known-truth synthetic work that will consume this registry.
 M2.8 may use synthetic transfer criteria as held-out outcomes for
 identifiability checks, but real wrapper-transfer outcomes remain external and
 uninspected until a later prospective prediction freeze.
+

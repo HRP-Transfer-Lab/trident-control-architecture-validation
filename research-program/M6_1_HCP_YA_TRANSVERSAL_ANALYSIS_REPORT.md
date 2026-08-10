@@ -6,10 +6,6 @@
 
 This is an exploratory HCP unrelated-subject test with N=100. It does not confirm g, cognitive control as a latent mechanism, vigilance as a latent mechanism, Trident-G, APC, PACE, W-specific capacity, bottlenecks, criticality or transfer.
 
-Programme level: Capability / State only. The analysis does not estimate
-Representational layer variables such as `L_WM` or Strategic variables such as
-`A_evidence`, `T_commit` or `PC_calibration`.
-
 ## Summary
 
 - Cohort mode: `hcp_100_unrelated`

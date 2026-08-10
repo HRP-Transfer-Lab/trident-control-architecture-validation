@@ -110,10 +110,21 @@ design. Its machine-readable companion is
 `config/hrp_stack_variable_registry_v2.yaml`, which registers `K`, `V`,
 `C_signal`, `A_evidence`, `T_commit`, `PC_calibration`, `R_dynamic`,
 `P_pace`, `Y_behavior`, `Transfer_external` and the MECH0-MECH7 causal
-families for later identifiability testing. It also separates the
-Capability/State, Representational and Strategic programmes, including gated
-representational layer candidates such as `L_attention`, `L_WM`,
-`L_predictive` and `L_reasoning`.
+families for later identifiability testing.
+
+### `M3_VARIABLE_ARCHITECTURE_V3.md`
+
+Adds a prospective working architecture for discriminative testing while
+preserving the historical V2 registry. Its machine-readable companion is
+`config/hrp_stack_variable_registry_v3.yaml`, which separates the
+Operating/Capability-State, Strategic and ontology-neutral Representational
+programmes, including layer/operator/hybrid alternatives.
+
+### `M6_1_HCP_YA_TRANSVERSAL_REVIEW.md`
+
+Reviews the completed M6.1 HCP-YA result under V3. It was written after M6.1
+and does not change the frozen M6.1 protocol, model set, split, metrics,
+numerical analysis or report.
 
 ## Operating rule
 
