@@ -22,6 +22,9 @@ def test_hcp_extract_schema_is_claim_bounded_and_ordered():
     assert schema.participant_level_data_in_git_allowed is False
     assert schema.model_fitting_allowed is False
     assert schema.columns[:2] == ("Subject", "Family_ID")
+    assert schema.required_columns[0] == "Subject"
+    assert "Family_ID" not in schema.required_columns
+    assert "Family_ID" in schema.optional_columns
     assert "ListSort_Unadj" in schema.columns
     assert "PMAT24_A_CR" in schema.columns
     assert "NIH_Flanker_Unadj" not in schema.columns

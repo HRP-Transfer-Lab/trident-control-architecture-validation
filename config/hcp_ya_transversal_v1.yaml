@@ -18,12 +18,20 @@ inputs:
   hcp_extract_path: data/processed/hcp_ya_transversal_extract.csv
   hcp_extract_sha256: null
   extract_schema_path: config/hcp_ya_transversal_extract_schema_v1.yaml
+  cohort_mode: hcp_100_unrelated
+  cohort_provenance:
+    official_hcp_100_unrelated_subjects_group_declared: true
+    official_group_name: HCP 100 Unrelated Subjects
+    access_route: ConnectomeDB powered by BALSA
+    exported_from_official_group: true
   participant_id_column: Subject
-  family_id_column: Family_ID
+  family_id_column: null
   unrelated_indicator_column: null
+  participant_isolated_cv_allowed: true
+  family_isolated_cv_required: false
   family_structure_policy:
-    preferred: family_isolated_cv
-    acceptable_without_restricted_access: unrelated_only_sample
+    preferred: explicit_unrelated_only_participant_isolated_cv
+    acceptable_without_restricted_access: hcp_100_unrelated
     ordinary_participant_folds_allowed: false
   participant_level_data_in_git_allowed: false
 

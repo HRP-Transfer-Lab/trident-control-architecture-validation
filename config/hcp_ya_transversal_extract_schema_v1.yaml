@@ -20,13 +20,15 @@ identity:
       canonical_column: Subject
       description: HCP participant identifier
       restricted: false
+  optional:
     Family_ID:
       hcp_source_column: Family_ID
       canonical_column: Family_ID
       description: family identifier for family-isolated cross-validation
       restricted: true
-      alternative_if_unavailable: provide an unrelated-only extract and configure unrelated indicator before analysis
-  optional:
+      required_in_cohort_mode: family
+      may_be_absent_only_when_cohort_mode: hcp_100_unrelated
+      alternative_if_unavailable: configure cohort_mode=hcp_100_unrelated with official HCP 100 Unrelated Subjects provenance before analysis
     Unrelated:
       hcp_source_column: Unrelated
       canonical_column: Unrelated

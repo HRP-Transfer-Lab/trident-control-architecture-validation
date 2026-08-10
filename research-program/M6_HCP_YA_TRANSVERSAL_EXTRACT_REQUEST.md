@@ -20,15 +20,30 @@ This path is ignored by repository policy.
 
 ```text
 Subject
-Family_ID
 ```
 
-`Family_ID` is preferred because HCP-YA contains twins/siblings and the primary
-analysis requires family-isolated cross-validation.
+`Family_ID` is preferred for arbitrary/full HCP-YA cohorts because HCP-YA
+contains twins/siblings and the primary analysis requires family-isolated
+cross-validation.
 
-If restricted family structure is unavailable, prepare an unrelated-only extract
-and add a boolean unrelated indicator column. The analysis config must then be
-amended before fitting so the unrelated-only safeguard is explicit.
+If restricted family structure is unavailable, `Family_ID` may be absent only
+when the input is explicitly configured as:
+
+```yaml
+inputs:
+  cohort_mode: hcp_100_unrelated
+  family_id_column: null
+  participant_isolated_cv_allowed: true
+  family_isolated_cv_required: false
+  cohort_provenance:
+    official_hcp_100_unrelated_subjects_group_declared: true
+    official_group_name: HCP 100 Unrelated Subjects
+    exported_from_official_group: true
+```
+
+This mode is valid only for exports from the official HCP-defined
+`100 Unrelated Subjects` group. It does not permit ordinary participant folds
+for arbitrary/full HCP cohorts.
 
 Ordinary random participant folds are not allowed.
 
@@ -136,8 +151,8 @@ Then populate the local file from authorised HCP-YA data access.
 
 ## Canonical Build Command
 
-After downloading an authorised local HCP-YA behavioural CSV/TSV/Parquet export,
-build the canonical ignored extract without manual renaming:
+After downloading one authorised local HCP-YA behavioural CSV/TSV/Parquet
+export, build the canonical ignored extract without manual renaming:
 
 ```powershell
 $env:PYTHONPATH='src'
@@ -150,10 +165,28 @@ python -m trident_validation.mechanistic.hcp_extract_builder `
   --force
 ```
 
+For the official HCP `100 Unrelated Subjects` route when BALSA exports are split
+across multiple column subsets, pass each source file and declare the unrelated
+provenance:
+
+```powershell
+$env:PYTHONPATH='src'
+
+python -m trident_validation.mechanistic.hcp_extract_builder `
+  --source path\to\authorised_hcp_export_main.csv `
+  --source path\to\authorised_hcp_export_vigilance.csv `
+  --schema config/hcp_ya_transversal_extract_schema_v1.yaml `
+  --output data/processed/hcp_ya_transversal_extract.csv `
+  --summary reports/generated/hcp_ya_transversal_v1/extract_build_summary.json `
+  --cohort-mode hcp_100_unrelated `
+  --official-hcp-100-unrelated-provenance `
+  --force
+```
+
 The builder writes only registered canonical columns, refuses missing required
-source columns, fills absent optional columns as empty, and writes a
-participant-free build summary. The output CSV remains local/ignored and must
-not be committed.
+source columns, validates one-to-one `Subject` merges for multi-file input,
+fills absent optional columns as empty, and writes a participant-free build
+summary. The output CSV remains local/ignored and must not be committed.
 
 ## Preflight Command
 

@@ -55,8 +55,11 @@ def run_hcp_transversal_preflight(
         domain_support = pd.DataFrame()
         split_support = {
             "status": "data_file_missing",
+            "cohort_mode": config["inputs"].get("cohort_mode", "family"),
             "family_isolated_cv_feasible": False,
             "unrelated_only_feasible": False,
+            "participant_isolated_cv_allowed": False,
+            "split_strategy": "blocked",
             "ordinary_participant_folds_allowed": False,
         }
         report = _render_report(summary, column_support, domain_support, split_support)
@@ -106,9 +109,14 @@ def run_hcp_transversal_preflight(
         "predictive_calibration_claim_allowed": False,
         "t_commit_claim_allowed": False,
         "participant_level_data_in_git_allowed": False,
+        "cohort_mode": config["inputs"].get("cohort_mode", "family"),
+        "cohort_provenance": config["inputs"].get("cohort_provenance", {}),
         "input_path": str(extract_path),
         "input_hash": observed_hash,
         "input_rows": int(len(data)),
+        "input_unique_subjects": int(data[config["inputs"]["participant_id_column"]].nunique())
+        if config["inputs"]["participant_id_column"] in data
+        else 0,
         "input_columns": int(len(data.columns)),
         "support_passed": support_passed,
         "config_hash": hash_file(root / config_file) if not config_file.is_absolute() else hash_file(config_file),
@@ -146,6 +154,30 @@ def validate_hcp_transversal_config(config: dict[str, Any]) -> None:
     inputs = _required_mapping(config, "inputs")
     if inputs.get("participant_level_data_in_git_allowed") is not False:
         raise ConfigValidationError("participant-level data must not be allowed in Git")
+    cohort_mode = inputs.get("cohort_mode", "family")
+    if cohort_mode not in {"family", "hcp_100_unrelated"}:
+        raise ConfigValidationError("inputs.cohort_mode must be family or hcp_100_unrelated")
+    if cohort_mode == "family":
+        if not inputs.get("family_id_column"):
+            raise ConfigValidationError("family cohort mode requires inputs.family_id_column")
+        if inputs.get("participant_isolated_cv_allowed") is True:
+            raise ConfigValidationError("family cohort mode must not allow participant-isolated CV")
+    if cohort_mode == "hcp_100_unrelated":
+        provenance = _required_mapping(inputs, "cohort_provenance")
+        if provenance.get("official_hcp_100_unrelated_subjects_group_declared") is not True:
+            raise ConfigValidationError(
+                "hcp_100_unrelated mode requires official HCP 100 Unrelated Subjects provenance"
+            )
+        if provenance.get("exported_from_official_group") is not True:
+            raise ConfigValidationError("hcp_100_unrelated mode requires exported_from_official_group=true")
+        if "100 Unrelated Subjects" not in str(provenance.get("official_group_name", "")):
+            raise ConfigValidationError("hcp_100_unrelated provenance must name the HCP 100 Unrelated Subjects group")
+        if inputs.get("family_id_column") is not None:
+            raise ConfigValidationError("hcp_100_unrelated mode must set inputs.family_id_column to null")
+        if inputs.get("participant_isolated_cv_allowed") is not True:
+            raise ConfigValidationError("hcp_100_unrelated mode must explicitly allow participant-isolated CV")
+        if inputs.get("family_isolated_cv_required") is not False:
+            raise ConfigValidationError("hcp_100_unrelated mode must set family_isolated_cv_required=false")
     family_policy = _required_mapping(inputs, "family_structure_policy")
     if family_policy.get("ordinary_participant_folds_allowed") is not False:
         raise ConfigValidationError("ordinary participant folds are not allowed for HCP-YA primary testing")
@@ -259,6 +291,7 @@ def _domain_support(data: pd.DataFrame, config: dict[str, Any]) -> pd.DataFrame:
 
 def _split_support(data: pd.DataFrame, config: dict[str, Any]) -> dict[str, Any]:
     inputs = config["inputs"]
+    cohort_mode = inputs.get("cohort_mode", "family")
     participant_col = inputs["participant_id_column"]
     family_col = inputs.get("family_id_column")
     unrelated_col = inputs.get("unrelated_indicator_column")
@@ -272,12 +305,19 @@ def _split_support(data: pd.DataFrame, config: dict[str, Any]) -> dict[str, Any]
         and n_families >= n_folds * int(thresholds["minimum_families_per_fold"])
     )
     unrelated_available = bool(unrelated_col and unrelated_col in data.columns)
-    unrelated_count = int(data.loc[data[unrelated_col].astype(bool), participant_col].nunique()) if unrelated_available and participant_col in data else 0
-    unrelated_feasible = bool(
-        unrelated_available
-        and unrelated_count >= int(thresholds["minimum_unrelated_participants"])
-    )
+    if cohort_mode == "hcp_100_unrelated" and participant_col in data:
+        unrelated_count = n_participants
+        unrelated_feasible = bool(n_participants >= int(thresholds["minimum_unrelated_participants"]))
+        participant_isolated_cv_allowed = unrelated_feasible and bool(inputs.get("participant_isolated_cv_allowed"))
+    else:
+        unrelated_count = int(data.loc[data[unrelated_col].astype(bool), participant_col].nunique()) if unrelated_available and participant_col in data else 0
+        unrelated_feasible = bool(
+            unrelated_available
+            and unrelated_count >= int(thresholds["minimum_unrelated_participants"])
+        )
+        participant_isolated_cv_allowed = False
     return {
+        "cohort_mode": cohort_mode,
         "participant_column_available": participant_col in data.columns,
         "n_participants": n_participants,
         "family_id_column": family_col,
@@ -288,6 +328,10 @@ def _split_support(data: pd.DataFrame, config: dict[str, Any]) -> dict[str, Any]
         "unrelated_indicator_available": unrelated_available,
         "n_unrelated_participants": unrelated_count,
         "unrelated_only_feasible": unrelated_feasible,
+        "participant_isolated_cv_allowed": participant_isolated_cv_allowed,
+        "split_strategy": "participant_isolated_official_hcp_100_unrelated"
+        if participant_isolated_cv_allowed
+        else ("family_isolated" if family_feasible else "blocked"),
         "ordinary_participant_folds_allowed": False,
     }
 
@@ -320,6 +364,8 @@ def _missing_data_summary(
         "model_fitting_allowed": False,
         "formal_claims_allowed": False,
         "trident_validation_claim_allowed": False,
+        "cohort_mode": config["inputs"].get("cohort_mode", "family"),
+        "cohort_provenance": config["inputs"].get("cohort_provenance", {}),
         "input_path": str(extract_path),
         "support_passed": False,
         "config_hash": hash_file(root / config_file) if not config_file.is_absolute() else hash_file(config_file),
@@ -355,13 +401,19 @@ def _render_report(
     ]
     if "input_hash" in summary:
         lines.append(f"- Input checksum: `{summary['input_hash']}`")
+    if "input_unique_subjects" in summary:
+        lines.append(f"- Input unique subjects: {summary['input_unique_subjects']}")
+    if "cohort_mode" in summary:
+        lines.append(f"- Cohort mode: `{summary['cohort_mode']}`")
     lines.extend(
         [
             "",
             "## Split Safeguard",
             "",
+            f"- Split strategy: `{split_support.get('split_strategy', 'blocked')}`",
             f"- Family-isolated CV feasible: {str(split_support.get('family_isolated_cv_feasible', False)).lower()}",
             f"- Unrelated-only feasible: {str(split_support.get('unrelated_only_feasible', False)).lower()}",
+            f"- Participant-isolated CV allowed: {str(split_support.get('participant_isolated_cv_allowed', False)).lower()}",
             f"- Ordinary participant folds allowed: {str(split_support.get('ordinary_participant_folds_allowed', False)).lower()}",
             "",
         ]

@@ -12,45 +12,48 @@ Do lower-level K/C_candidate/V coordinates transport across attention/control, w
 
 ## Summary
 
-- Status: `data_support_incomplete`
-- Support passed: false
+- Status: `data_support_passed_ready_to_freeze_analysis`
+- Support passed: true
 - Input path: `data\processed\hcp_ya_transversal_extract.csv`
-- Input checksum: `sha256:6ddcf3a9463a0c1fa96639948ebb7a27107bfb1e99248096b0c28ac54f813a2e`
+- Input checksum: `sha256:b43456153602ece24b2e8ea283b68e4faca3146f2a9b373588913704ae86069b`
+- Input unique subjects: 100
+- Cohort mode: `hcp_100_unrelated`
 
 ## Split Safeguard
 
+- Split strategy: `participant_isolated_official_hcp_100_unrelated`
 - Family-isolated CV feasible: false
-- Unrelated-only feasible: false
+- Unrelated-only feasible: true
+- Participant-isolated CV allowed: true
 - Ordinary participant folds allowed: false
 
 ## Column Support
 
 | Role | Variable/domain | Column | Required | Available | Nonmissing |
 |---|---|---|---:|---:|---:|
-| identity | participant_id | Subject | true | true | 0 |
-| identity | family_id | Family_ID | true | true | 0 |
-| predictor | K | ProcSpeed_Unadj | true | true | 0 |
-| predictor | K | PicSeq_Unadj | true | true | 0 |
-| predictor | K | ReadEng_Unadj | true | true | 0 |
-| predictor | K | PicVocab_Unadj | true | true | 0 |
-| predictor | C_candidate | Flanker_Unadj | true | true | 0 |
-| predictor | V | SCPT_SEN | true | true | 0 |
-| predictor | V | SCPT_SPEC | true | true | 0 |
-| outcome | attention_control | CardSort_Unadj | true | true | 0 |
-| outcome | wm_list_sorting | ListSort_Unadj | true | true | 0 |
+| identity | participant_id | Subject | true | true | 100 |
+| predictor | K | ProcSpeed_Unadj | true | true | 100 |
+| predictor | K | PicSeq_Unadj | true | true | 100 |
+| predictor | K | ReadEng_Unadj | true | true | 100 |
+| predictor | K | PicVocab_Unadj | true | true | 100 |
+| predictor | C_candidate | Flanker_Unadj | true | true | 100 |
+| predictor | V | SCPT_SEN | true | true | 100 |
+| predictor | V | SCPT_SPEC | true | true | 100 |
+| outcome | attention_control | CardSort_Unadj | true | true | 100 |
+| outcome | wm_list_sorting | ListSort_Unadj | true | true | 100 |
 | outcome | wm_nback | WM_Task_2bk_Acc | false | true | 0 |
-| outcome | reasoning_pmat | PMAT24_A_CR | true | true | 0 |
-| secondary_outcome | reasoning_pmat | PMAT24_A_RTCR | true | true | 0 |
+| outcome | reasoning_pmat | PMAT24_A_CR | true | true | 100 |
+| secondary_outcome | reasoning_pmat | PMAT24_A_RTCR | true | true | 100 |
 | outcome | reasoning_relational | Relational_Task_Acc | false | true | 0 |
 
 ## Domain Support
 
 | Domain | Primary | Required | Analysis eligible | Status | Complete participants | Missing columns | Support passed |
 |---|---:|---:|---:|---|---:|---|---:|
-| attention_control | false | true | true | support_required | 0 | none | false |
-| wm_list_sorting | true | true | true | support_required | 0 | none | false |
+| attention_control | false | true | true | support_required | 100 | none | true |
+| wm_list_sorting | true | true | true | support_required | 100 | none | true |
 | wm_nback | false | false | false | optional_known_issue_pending | 0 | none | false |
-| reasoning_pmat | true | true | true | support_required | 0 | none | false |
+| reasoning_pmat | true | true | true | support_required | 100 | none | true |
 | reasoning_relational | false | false | false | optional | 0 | none | false |
 
 ## Boundary
